@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.17 Web (Gemini AI 전용 예문)</title>
+<title>나만의 영단어 암기 게임 v7.18 Web (Gemini AI 모델 자동 감지)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -742,11 +742,16 @@
     <div style="display:flex; flex-direction:column; gap:6px;">
       <label style="font-weight:bold; font-size:14px;">1. Gemini API Key:</label>
       <input type="password" id="geminiApiKeyInput" class="text-input" placeholder="AIzaSy...">
-      <label style="font-weight:bold; font-size:14px; margin-top:4px;">2. 사용할 AI 모델:</label>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:4px;">
+        <label style="font-weight:bold; font-size:14px;">2. 사용할 AI 모델:</label>
+        <button type="button" class="btn-purple" id="btnLoadModels" style="padding:4px 9px; font-size:12px;" onclick="loadAvailableModelsUI()">🔍 사용 가능한 모델 불러오기</button>
+      </div>
       <select id="geminiModelSelect" class="text-input" style="cursor:pointer;">
-        <option value="gemini-2.5-flash">gemini-2.5-flash (추천 · 빠르고 자연스러움)</option>
-        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (초고속 · 무료 한도 넉넉)</option>
-        <option value="gemini-2.0-flash">gemini-2.0-flash (안정형)</option>
+        <option value="auto">✨ 자동 선택 (내 키에서 작동하는 최신 Flash 모델 자동 연결)</option>
+        <option value="gemini-flash-latest">gemini-flash-latest (최신 Flash 별칭)</option>
+        <option value="gemini-flash-lite-latest">gemini-flash-lite-latest (최신 Flash-Lite 별칭)</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
       </select>
     </div>
     <div id="aiModalStatus" style="font-size:13px; font-weight:bold; min-height:18px; color:#1565c0;"></div>
@@ -1325,7 +1330,20 @@ function getGeminiApiKey() {
 }
 
 function getGeminiModel() {
-  return safeGetStorage("vocab_gemini_model") || "gemini-2.5-flash";
+  return safeGetStorage("vocab_gemini_model") || "auto";
+}
+
+function ensureModelOptionInSelect(modelId) {
+  const modelSel = document.getElementById("geminiModelSelect");
+  if (!modelSel || !modelId) return;
+  const exists = Array.from(modelSel.options).some(function(opt) { return opt.value === modelId; });
+  if (!exists) {
+    const opt = document.createElement("option");
+    opt.value = modelId;
+    opt.textContent = modelId + " (자동 감지됨)";
+    modelSel.appendChild(opt);
+  }
+  modelSel.value = modelId;
 }
 
 function updateAiButtonUI() {
@@ -1342,13 +1360,16 @@ function updateAiButtonUI() {
 
 function openAiModal() {
   const keyInp = document.getElementById("geminiApiKeyInput");
-  const modelSel = document.getElementById("geminiModelSelect");
   const statusEl = document.getElementById("aiModalStatus");
   if (keyInp) keyInp.value = getGeminiApiKey();
-  if (modelSel) modelSel.value = getGeminiModel();
+  ensureModelOptionInSelect(getGeminiModel());
   if (statusEl) {
-    statusEl.textContent = getGeminiApiKey() ? "🟢 현재 Gemini AI 무한 예문이 활성화되어 있습니다." : "";
-    statusEl.style.color = "#2e7d32";
+    if (getGeminiApiKey()) {
+      statusEl.textContent = "🟢 현재 Gemini AI 활성화됨 (모델: " + getGeminiModel() + ")";
+      statusEl.style.color = "#2e7d32";
+    } else {
+      statusEl.textContent = "";
+    }
   }
   document.getElementById("aiModal").style.display = "flex";
   setTimeout(function() { if (keyInp) keyInp.focus(); }, 50);
@@ -1360,9 +1381,110 @@ function closeAiModal() {
 
 function disconnectAiConfig() {
   safeRemoveStorage("vocab_gemini_api_key");
+  safeRemoveStorage("vocab_gemini_model");
   updateAiButtonUI();
   closeAiModal();
   alert("Gemini AI 연결이 해제되었습니다. (이미 저장된 AI 예문만 표시됩니다)");
+}
+
+function scoreGeminiModel(id) {
+  const s = id.toLowerCase();
+  if (s === "gemini-flash-latest") return 1000;
+  if (s === "gemini-flash-lite-latest") return 950;
+  let score = 0;
+  const verMatch = s.match(/gemini-(\d+)(?:\.(\d+))?/);
+  if (verMatch) {
+    score += parseInt(verMatch[1], 10) * 100 + (verMatch[2] ? parseInt(verMatch[2], 10) * 10 : 0);
+  }
+  if (s.includes("flash-lite")) score += 60;
+  else if (s.includes("flash")) score += 70;
+  else if (s.includes("pro")) score += 20;
+  if (s.includes("preview") || s.includes("exp")) score -= 5;
+  return score;
+}
+
+async function fetchAvailableGeminiModels(apiKey, signal) {
+  const url = "https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(apiKey);
+  const res = await fetch(url, { signal: signal });
+  if (!res.ok) {
+    const errText = await res.text().catch(function() { return ""; });
+    throw new Error("모델 목록 조회 실패 (" + res.status + ")" + (errText ? ": " + errText.slice(0, 120) : ""));
+  }
+  const data = await res.json();
+  const models = Array.isArray(data && data.models) ? data.models : [];
+  const excluded = /(embedding|imagen|veo|tts|audio|robotics|computer-use|deep-research|lyria|aqa|bisheng|gemma)/i;
+
+  const usable = models
+    .filter(function(m) {
+      const methods = m.supportedGenerationMethods || [];
+      const name = (m.name || "").replace(/^models\//, "");
+      return methods.includes("generateContent") && /^gemini-/i.test(name) && !excluded.test(name);
+    })
+    .map(function(m) {
+      return (m.name || "").replace(/^models\//, "");
+    });
+
+  // 중복 제거 및 추천 순 정렬 (최신 Flash 우선)
+  const unique = Array.from(new Set(usable));
+  unique.sort(function(a, b) { return scoreGeminiModel(b) - scoreGeminiModel(a); });
+  return unique;
+}
+
+async function loadAvailableModelsUI() {
+  const keyInp = document.getElementById("geminiApiKeyInput");
+  const modelSel = document.getElementById("geminiModelSelect");
+  const statusEl = document.getElementById("aiModalStatus");
+  const btn = document.getElementById("btnLoadModels");
+  const apiKey = keyInp ? keyInp.value.trim() : "";
+
+  if (!apiKey) {
+    alert("먼저 Gemini API Key를 입력해주세요.");
+    if (keyInp) keyInp.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "⏳ 조회 중...";
+  statusEl.textContent = "🔄 이 API 키로 사용 가능한 모델 목록을 불러오는 중...";
+  statusEl.style.color = "#1565c0";
+
+  const controller = new AbortController();
+  const timer = setTimeout(function() { controller.abort(); }, 8000);
+  try {
+    const list = await fetchAvailableGeminiModels(apiKey, controller.signal);
+    clearTimeout(timer);
+    if (list.length === 0) {
+      statusEl.textContent = "⚠️ 사용 가능한 Gemini 텍스트 모델을 찾지 못했습니다.";
+      statusEl.style.color = "#c62828";
+      return;
+    }
+    const prevVal = modelSel.value;
+    modelSel.innerHTML = "";
+    const autoOpt = document.createElement("option");
+    autoOpt.value = "auto";
+    autoOpt.textContent = "✨ 자동 선택 (내 키에서 작동하는 최신 Flash 모델 자동 연결)";
+    modelSel.appendChild(autoOpt);
+
+    list.forEach(function(mId, idx) {
+      const opt = document.createElement("option");
+      opt.value = mId;
+      opt.textContent = mId + (idx === 0 ? " (추천)" : "");
+      modelSel.appendChild(opt);
+    });
+
+    if (list.includes(prevVal)) modelSel.value = prevVal;
+    else modelSel.value = list[0];
+
+    statusEl.textContent = "✔️ 사용 가능한 모델 " + list.length + "개를 불러왔습니다! [연결 테스트 및 저장]을 눌러주세요.";
+    statusEl.style.color = "#2e7d32";
+  } catch (err) {
+    clearTimeout(timer);
+    statusEl.textContent = "❌ 모델 목록 조회 실패: API 키를 확인해주세요. (" + (err.message || "오류") + ")";
+    statusEl.style.color = "#c62828";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔍 사용 가능한 모델 불러오기";
+  }
 }
 
 async function callGeminiExampleAPI(word, kor, prevList, apiKey, model, signal) {
@@ -1394,7 +1516,9 @@ async function callGeminiExampleAPI(word, kor, prevList, apiKey, model, signal) 
 
   if (!res.ok) {
     const errText = await res.text().catch(function() { return ""; });
-    throw new Error("API 오류 (" + res.status + ")" + (errText ? ": " + errText.slice(0, 120) : ""));
+    const err = new Error("API 오류 (" + res.status + ")" + (errText ? ": " + errText.slice(0, 140) : ""));
+    err.status = res.status;
+    throw err;
   }
 
   const data = await res.json();
@@ -1418,6 +1542,39 @@ async function callGeminiExampleAPI(word, kor, prevList, apiKey, model, signal) 
   };
 }
 
+async function resolveAndCallGemini(word, kor, prevList, apiKey, preferredModel, signal) {
+  // 1) 지정 모델이 auto가 아니면 먼저 시도
+  if (preferredModel && preferredModel !== "auto") {
+    try {
+      const res = await callGeminiExampleAPI(word, kor, prevList, apiKey, preferredModel, signal);
+      return { res: res, usedModel: preferredModel };
+    } catch (err) {
+      // 404(모델 종료/미지원)가 아니면 그대로 에러 전달
+      if (err.status !== 404) throw err;
+    }
+  }
+
+  // 2) 자동 감지: 내 API 키로 사용 가능한 모델 목록 조회 후 상위 모델 순차 시도
+  const available = await fetchAvailableGeminiModels(apiKey, signal);
+  const tryOrder = available.length > 0
+    ? available.slice(0, 5)
+    : ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"];
+
+  let lastErr = new Error("사용 가능한 모델을 찾지 못했습니다.");
+  for (let i = 0; i < tryOrder.length; i++) {
+    const candidate = tryOrder[i];
+    if (candidate === preferredModel) continue;
+    try {
+      const res = await callGeminiExampleAPI(word, kor, prevList, apiKey, candidate, signal);
+      return { res: res, usedModel: candidate };
+    } catch (err) {
+      lastErr = err;
+      if (err.status === 401 || err.status === 403) throw err;
+    }
+  }
+  throw lastErr;
+}
+
 async function saveAiConfig() {
   const keyInp = document.getElementById("geminiApiKeyInput");
   const modelSel = document.getElementById("geminiModelSelect");
@@ -1425,7 +1582,7 @@ async function saveAiConfig() {
   const btn = document.getElementById("btnSaveAiConfig");
 
   const apiKey = keyInp ? keyInp.value.trim() : "";
-  const model = modelSel ? modelSel.value : "gemini-2.5-flash";
+  const selectedModel = modelSel ? modelSel.value : "auto";
 
   if (!apiKey) {
     alert("Gemini API Key를 입력해주세요.");
@@ -1435,25 +1592,26 @@ async function saveAiConfig() {
 
   btn.disabled = true;
   btn.textContent = "⏳ 연결 테스트 중...";
-  statusEl.textContent = "🔄 Gemini AI에 테스트 예문 요청 중...";
+  statusEl.textContent = "🔄 사용 가능한 Gemini 모델을 확인하고 테스트 예문을 요청 중...";
   statusEl.style.color = "#1565c0";
 
   const controller = new AbortController();
-  const timer = setTimeout(function() { controller.abort(); }, 8000);
+  const timer = setTimeout(function() { controller.abort(); }, 12000);
   try {
-    const testRes = await callGeminiExampleAPI("insightful", "통찰력있는", [], apiKey, model, controller.signal);
+    const out = await resolveAndCallGemini("insightful", "통찰력있는", [], apiKey, selectedModel, controller.signal);
     clearTimeout(timer);
     safeSetStorage("vocab_gemini_api_key", apiKey);
-    safeSetStorage("vocab_gemini_model", model);
+    safeSetStorage("vocab_gemini_model", out.usedModel);
+    ensureModelOptionInSelect(out.usedModel);
     updateAiButtonUI();
-    statusEl.textContent = "✔️ 연결 성공! 테스트 예문: " + testRes.example;
+    statusEl.textContent = "✔️ 연결 성공! (자동 연결된 모델: " + out.usedModel + ") 테스트 예문: " + out.res.example;
     statusEl.style.color = "#2e7d32";
     setTimeout(function() {
       closeAiModal();
       if (inQuizMode && currentQuestion && autoFetchExample) {
         updateQuizExampleUI(true);
       }
-    }, 900);
+    }, 1000);
   } catch (err) {
     clearTimeout(timer);
     statusEl.textContent = "❌ 연결 실패: API 키나 모델을 확인해주세요. (" + (err.message || "오류") + ")";
@@ -2141,8 +2299,12 @@ async function autoFetchGeminiExampleForWord(word, kor, reqId, apiKey) {
   const timer = setTimeout(function() { controller.abort(); }, 8000);
 
   try {
-    const res = await callGeminiExampleAPI(word, kor, prevList, apiKey, getGeminiModel(), controller.signal);
+    const out = await resolveAndCallGemini(word, kor, prevList, apiKey, getGeminiModel(), controller.signal);
     clearTimeout(timer);
+    if (out.usedModel && out.usedModel !== getGeminiModel()) {
+      safeSetStorage("vocab_gemini_model", out.usedModel);
+    }
+    const res = out.res;
     if (reqId !== exampleRequestSeq || !inQuizMode || currentQuestion !== word) return;
 
     // 생성된 예문과 번역을 단어당 최대 8개까지 영구 저장 (로컬 + 클라우드 동기화)
@@ -2262,8 +2424,12 @@ async function fetchDictionaryExample() {
     const prevList = getSavedAiExamples(word).map(function(item) { return item.ex; });
     const controller = new AbortController();
     const timer = setTimeout(function() { controller.abort(); }, 8000);
-    const aiRes = await callGeminiExampleAPI(word, kor, prevList, geminiKey, getGeminiModel(), controller.signal);
+    const out = await resolveAndCallGemini(word, kor, prevList, geminiKey, getGeminiModel(), controller.signal);
     clearTimeout(timer);
+    if (out.usedModel && out.usedModel !== getGeminiModel()) {
+      safeSetStorage("vocab_gemini_model", out.usedModel);
+    }
+    const aiRes = out.res;
     if (aiRes && aiRes.example) {
       addSavedAiExample(word, aiRes.example, aiRes.translation);
       saveAllState();
