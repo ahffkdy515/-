@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.21 Web (이전 예문 버튼 & 모바일 레이아웃 개선)</title>
+<title>나만의 영단어 암기 게임 v7.22 Web (A/D키 예문 이동 추가)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -595,7 +595,7 @@
   <!-- 화면 2: 퀴즈 화면 -->
   <div id="quizScreen" style="display:flex; flex-direction:column; gap:8px; flex:1;">
     <div class="shortcut-banner">
-      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답 보기 / 예문 읽기 | [Z] 예문 듣기 | [◀/▶] 이전·다음 | [S] 오답노트 | [T] 번역기
+      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답·예문 읽기 | [A/D] 이전·다음 예문 | [Z] 예문 듣기 | [◀/▶] 이전·다음 단어 | [S] 오답노트 | [T] 번역기
     </div>
 
     <div class="quiz-nav">
@@ -621,8 +621,8 @@
         <div class="example-translation" id="quizExampleTrans" style="display:none;"></div>
       </div>
       <div class="example-btns">
-        <button type="button" id="btnPrevExample" style="padding:5px 10px; font-size:13px;" onclick="prevAutoExample()" disabled>◀ 이전 예문</button>
-        <button type="button" class="btn-blue" id="btnRefreshExample" style="padding:5px 10px; font-size:13px;" onclick="refreshAutoExample()">🔄 다른 예문</button>
+        <button type="button" id="btnPrevExample" style="padding:5px 10px; font-size:13px;" onclick="prevAutoExample()" disabled>◀ 이전 예문 (A)</button>
+        <button type="button" class="btn-blue" id="btnRefreshExample" style="padding:5px 10px; font-size:13px;" onclick="refreshAutoExample()">🔄 다음 예문 (D)</button>
         <button type="button" class="btn-green" style="padding:5px 10px; font-size:13px;" onclick="speakCurrentExample()">🔊 예문 듣기 (Z)</button>
         <button type="button" class="btn-purple" style="padding:5px 10px; font-size:13px;" onclick="openExampleModal(currentQuestion)">✏️ 수정</button>
       </div>
@@ -1033,9 +1033,9 @@ function updateRefreshExampleBtnLabel(word) {
   const savedCount = getSavedAiExamples(word).length;
   if (btn) {
     if (savedCount > 0) {
-      btn.textContent = "🔄 다른 예문 (" + savedCount + "/" + MAX_SAVED_AI_EXAMPLES + ")";
+      btn.textContent = "🔄 다음 예문 (" + savedCount + "/" + MAX_SAVED_AI_EXAMPLES + ") (D)";
     } else {
-      btn.textContent = "🔄 다른 예문";
+      btn.textContent = "🔄 다음 예문 (D)";
     }
   }
   if (prevBtn) {
@@ -2777,6 +2777,12 @@ window.addEventListener("keydown", function(e) {
     } else if (e.key === "z" || e.key === "Z" || e.key === "ㅋ" || e.code === "KeyZ") {
       e.preventDefault();
       speakCurrentExample();
+    } else if (e.key === "a" || e.key === "A" || e.key === "ㅁ" || e.code === "KeyA") {
+      e.preventDefault();
+      prevAutoExample();
+    } else if (e.key === "d" || e.key === "D" || e.key === "ㅇ" || e.code === "KeyD") {
+      e.preventDefault();
+      refreshAutoExample();
     } else if (e.key === "1") {
       e.preventDefault();
       if (!optionsVisible) {
