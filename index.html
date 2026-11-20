@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.2 Web (PC & 모바일 클라우드 동기화)</title>
+<title>나만의 영단어 암기 게임 v7.3 Web (오답 자동 세이브 & 클라우드 동기화)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -423,7 +423,13 @@
   <!-- 상단 2: 세이브 전용 오답노트 지정 바 -->
   <div class="target-bar">
     <div class="target-label" id="targetStatusLabel">📌 현재 세이브 지정 디렉토리 : [오답노트 1]</div>
-    <button type="button" class="btn-yellow" onclick="openTargetModal()">📌 오답노트 지정 변경</button>
+    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+      <label style="display:flex; align-items:center; gap:5px; font-size:14px; font-weight:bold; color:#bf360c; cursor:pointer; user-select:none;">
+        <input type="checkbox" id="autoSaveWrongChk" checked onchange="onAutoSaveToggle()" style="width:17px; height:17px; cursor:pointer;">
+        오답 시 자동 세이브
+      </label>
+      <button type="button" class="btn-yellow" onclick="openTargetModal()">📌 오답노트 지정 변경</button>
+    </div>
   </div>
 
   <!-- 중단: 메뉴 전환 버튼 -->
@@ -570,6 +576,7 @@ let displayedKeys = [];
 let selectedListIndices = new Set();
 let pendingTargetChoice = "";
 let syncTimeout = null;
+let autoSaveWrong = true;
 
 // 로컬 파일(file://)이나 사파리 사생활 보호 모드 등에서 localStorage 차단 시에도 멈추지 않도록 안전 래퍼 사용
 function safeGetStorage(key) {
@@ -627,6 +634,12 @@ function initApp() {
     targetDeck = keys[keys.length - 1];
   }
 
+  if (typeof progress["_auto_save_wrong"] === "boolean") {
+    autoSaveWrong = progress["_auto_save_wrong"];
+  } else {
+    autoSaveWrong = true;
+  }
+
   updateDeckSelectUI();
   updateTargetUI();
   updateSyncBanner();
@@ -649,6 +662,7 @@ function initApp() {
 function saveAllState() {
   progress["_last_deck"] = currentDeck;
   progress["_target_deck"] = targetDeck;
+  progress["_auto_save_wrong"] = autoSaveWrong;
   safeSetStorage("vocab_v72_decks", JSON.stringify(decks));
   safeSetStorage("vocab_v72_progress", JSON.stringify(progress));
   scheduleCloudPush();
@@ -712,6 +726,14 @@ function updateTargetUI() {
   if (saveBtn) saveBtn.textContent = "💾 [" + targetDeck + "]에 세이브 (클릭 / S)";
   const targetLbl = document.getElementById("quizTargetLabel");
   if (targetLbl) targetLbl.textContent = "저장될 곳: [" + targetDeck + "]";
+  const autoChk = document.getElementById("autoSaveWrongChk");
+  if (autoChk) autoChk.checked = autoSaveWrong;
+}
+
+function onAutoSaveToggle() {
+  const autoChk = document.getElementById("autoSaveWrongChk");
+  autoSaveWrong = autoChk ? autoChk.checked : true;
+  saveAllState();
 }
 
 function onDeckChange() {
@@ -1117,9 +1139,33 @@ function checkAnswer(idx) {
       advanceAndNext();
     }, 220);
   } else {
-    feedbackEl.textContent = "❌ 오답입니다! 발음을 다시 듣고 맞춰보세요.";
-    feedbackEl.style.color = "#c62828";
     document.getElementById("optBtn" + idx).style.background = "#ffcdd2";
+    if (autoSaveWrong && decks[targetDeck]) {
+      if (targetDeck !== currentDeck) {
+        const eng = currentQuestion;
+        const kor = decks[currentDeck][eng];
+        const alreadyExists = Object.prototype.hasOwnProperty.call(decks[targetDeck], eng);
+        decks[targetDeck][eng] = kor;
+        saveAllState();
+        updateDeckSelectUI();
+
+        const saveBtn = document.getElementById("quizSaveBtn");
+        saveBtn.textContent = "✔️ [" + targetDeck + "]에 자동 세이브 완료!";
+        saveBtn.style.background = "#a5d6a7";
+
+        const totalInTarget = Object.keys(decks[targetDeck]).length;
+        feedbackEl.textContent = alreadyExists
+          ? "❌ 오답입니다! (이미 [" + targetDeck + "]에 있음 · 총 " + totalInTarget + "단어) 발음을 다시 듣고 맞춰보세요."
+          : "❌ 오답입니다! 💾 [" + targetDeck + "]에 자동 세이브되었습니다! (총 " + totalInTarget + "단어)";
+        feedbackEl.style.color = "#c62828";
+      } else {
+        feedbackEl.textContent = "❌ 오답입니다! (현재 노트가 오답노트 지정과 같아 중복 저장 생략) 발음을 다시 듣고 맞춰보세요.";
+        feedbackEl.style.color = "#c62828";
+      }
+    } else {
+      feedbackEl.textContent = "❌ 오답입니다! 발음을 다시 듣고 맞춰보세요.";
+      feedbackEl.style.color = "#c62828";
+    }
     speakText(currentQuestion);
   }
 }
@@ -1287,6 +1333,9 @@ function importJsonFiles(event) {
 
           const targetD = progress["_target_deck"];
           if (targetD && decks[targetD]) targetDeck = targetD;
+          if (typeof progress["_auto_save_wrong"] === "boolean") {
+            autoSaveWrong = progress["_auto_save_wrong"];
+          }
 
           saveAllState();
           updateDeckSelectUI();
@@ -1454,6 +1503,9 @@ async function cloudPull(showAlert) {
         }
         if (progress["_target_deck"] && decks[progress["_target_deck"]]) {
           targetDeck = progress["_target_deck"];
+        }
+        if (typeof progress["_auto_save_wrong"] === "boolean") {
+          autoSaveWrong = progress["_auto_save_wrong"];
         }
         updateDeckSelectUI();
         updateTargetUI();
