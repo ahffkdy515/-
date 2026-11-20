@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.4 Web (오답 자동 세이브 & 예문 추가)</title>
+<title>나만의 영단어 암기 게임 v7.5 Web (오답 자동 세이브 & 자동 예문)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -468,6 +468,10 @@
         <input type="checkbox" id="autoSaveWrongChk" checked onchange="onAutoSaveToggle()" style="width:17px; height:17px; cursor:pointer;">
         오답 시 자동 세이브
       </label>
+      <label style="display:flex; align-items:center; gap:5px; font-size:14px; font-weight:bold; color:#4527a0; cursor:pointer; user-select:none;">
+        <input type="checkbox" id="autoExampleChk" checked onchange="onAutoExampleToggle()" style="width:17px; height:17px; cursor:pointer;">
+        자동 예문
+      </label>
       <button type="button" class="btn-yellow" onclick="openTargetModal()">📌 오답노트 지정 변경</button>
     </div>
   </div>
@@ -650,7 +654,9 @@ let selectedListIndices = new Set();
 let pendingTargetChoice = "";
 let syncTimeout = null;
 let autoSaveWrong = true;
+let autoFetchExample = true;
 let editingExampleWord = null;
+const autoExampleNotFoundCache = new Set();
 
 // 로컬 파일(file://)이나 사파리 사생활 보호 모드 등에서 localStorage 차단 시에도 멈추지 않도록 안전 래퍼 사용
 function safeGetStorage(key) {
@@ -714,6 +720,12 @@ function initApp() {
     autoSaveWrong = true;
   }
 
+  if (typeof progress["_auto_fetch_example"] === "boolean") {
+    autoFetchExample = progress["_auto_fetch_example"];
+  } else {
+    autoFetchExample = true;
+  }
+
   updateDeckSelectUI();
   updateTargetUI();
   updateSyncBanner();
@@ -737,6 +749,7 @@ function saveAllState() {
   progress["_last_deck"] = currentDeck;
   progress["_target_deck"] = targetDeck;
   progress["_auto_save_wrong"] = autoSaveWrong;
+  progress["_auto_fetch_example"] = autoFetchExample;
   safeSetStorage("vocab_v72_decks", JSON.stringify(decks));
   safeSetStorage("vocab_v72_progress", JSON.stringify(progress));
   scheduleCloudPush();
@@ -827,12 +840,23 @@ function updateTargetUI() {
   if (targetLbl) targetLbl.textContent = "저장될 곳: [" + targetDeck + "]";
   const autoChk = document.getElementById("autoSaveWrongChk");
   if (autoChk) autoChk.checked = autoSaveWrong;
+  const exChk = document.getElementById("autoExampleChk");
+  if (exChk) exChk.checked = autoFetchExample;
 }
 
 function onAutoSaveToggle() {
   const autoChk = document.getElementById("autoSaveWrongChk");
   autoSaveWrong = autoChk ? autoChk.checked : true;
   saveAllState();
+}
+
+function onAutoExampleToggle() {
+  const exChk = document.getElementById("autoExampleChk");
+  autoFetchExample = exChk ? exChk.checked : true;
+  saveAllState();
+  if (inQuizMode && currentQuestion) {
+    updateQuizExampleUI();
+  }
 }
 
 function onDeckChange() {
@@ -1232,15 +1256,76 @@ function updateQuizExampleUI() {
   const exBtn = document.getElementById("quizExampleBtn");
   if (!exBox || !exText || !exBtn) return;
 
-  const ex = getExample(currentQuestion);
+  const word = currentQuestion;
+  const ex = getExample(word);
   if (ex) {
     exText.textContent = "📝 " + ex;
     exBox.style.display = "flex";
     exBtn.textContent = "📝 예문 수정 (E)";
-  } else {
+    return;
+  }
+
+  exBtn.textContent = "📝 예문 추가 (E)";
+  if (!autoFetchExample || !word || autoExampleNotFoundCache.has(word.toLowerCase())) {
     exText.textContent = "";
     exBox.style.display = "none";
-    exBtn.textContent = "📝 예문 추가 (E)";
+    return;
+  }
+
+  // 자동 예문 불러오기
+  exText.textContent = "⏳ 자동 예문 불러오는 중...";
+  exBox.style.display = "flex";
+  autoFetchExampleForWord(word);
+}
+
+async function autoFetchExampleForWord(word) {
+  const wordKey = word.trim().toLowerCase();
+  try {
+    const res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(wordKey));
+    if (!res.ok) throw new Error("not found");
+    const data = await res.json();
+    let foundEx = "";
+    if (Array.isArray(data)) {
+      for (let i = 0; i < data.length && !foundEx; i++) {
+        const meanings = data[i].meanings || [];
+        for (let j = 0; j < meanings.length && !foundEx; j++) {
+          const defs = meanings[j].definitions || [];
+          for (let k = 0; k < defs.length && !foundEx; k++) {
+            if (defs[k].example) {
+              foundEx = defs[k].example;
+            }
+          }
+        }
+      }
+    }
+    if (foundEx) {
+      setExample(word, foundEx);
+      saveAllState();
+      if (inQuizMode && currentQuestion === word) {
+        const exBox = document.getElementById("quizExampleBox");
+        const exText = document.getElementById("quizExampleText");
+        const exBtn = document.getElementById("quizExampleBtn");
+        if (exText) exText.textContent = "📝 " + foundEx;
+        if (exBox) exBox.style.display = "flex";
+        if (exBtn) exBtn.textContent = "📝 예문 수정 (E)";
+      }
+    } else {
+      autoExampleNotFoundCache.add(wordKey);
+      if (inQuizMode && currentQuestion === word) {
+        const exBox = document.getElementById("quizExampleBox");
+        const exText = document.getElementById("quizExampleText");
+        if (exText) exText.textContent = "";
+        if (exBox) exBox.style.display = "none";
+      }
+    }
+  } catch (e) {
+    autoExampleNotFoundCache.add(wordKey);
+    if (inQuizMode && currentQuestion === word) {
+      const exBox = document.getElementById("quizExampleBox");
+      const exText = document.getElementById("quizExampleText");
+      if (exText) exText.textContent = "";
+      if (exBox) exBox.style.display = "none";
+    }
   }
 }
 
@@ -1587,6 +1672,9 @@ function importJsonFiles(event) {
           if (typeof progress["_auto_save_wrong"] === "boolean") {
             autoSaveWrong = progress["_auto_save_wrong"];
           }
+          if (typeof progress["_auto_fetch_example"] === "boolean") {
+            autoFetchExample = progress["_auto_fetch_example"];
+          }
 
           saveAllState();
           updateDeckSelectUI();
@@ -1757,6 +1845,9 @@ async function cloudPull(showAlert) {
         }
         if (typeof progress["_auto_save_wrong"] === "boolean") {
           autoSaveWrong = progress["_auto_save_wrong"];
+        }
+        if (typeof progress["_auto_fetch_example"] === "boolean") {
+          autoFetchExample = progress["_auto_fetch_example"];
         }
         updateDeckSelectUI();
         updateTargetUI();
