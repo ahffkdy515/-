@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.24 Web (깔끔한 노란 하이라이트 & 흔들림 제거)</title>
+<title>나만의 영단어 암기 게임 v7.25 Web (단어 호버 자동해석 & 드래그 문장 자동해석)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -497,6 +497,71 @@
     white-space: pre-wrap;
   }
 
+  /* 단어 마우스 호버 자동해석 툴팁 */
+  .hover-trans-tooltip {
+    position: fixed;
+    z-index: 2000;
+    pointer-events: none;
+    display: none;
+    background: #263238;
+    color: #ffffff;
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 15px;
+    line-height: 1.4;
+    max-width: 280px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.28);
+    word-break: keep-all;
+  }
+  .hover-trans-word {
+    color: #ffe082;
+    font-weight: bold;
+    margin-right: 6px;
+  }
+
+  /* 드래그(스크랩) 구간 자동해석 팝업 */
+  .drag-trans-popup {
+    position: fixed;
+    z-index: 2100;
+    display: none;
+    background: #ffffff;
+    border: 2px solid #7e57c2;
+    border-radius: 10px;
+    padding: 10px 14px;
+    max-width: 420px;
+    min-width: 200px;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.22);
+    flex-direction: column;
+    gap: 6px;
+  }
+  .drag-trans-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #5e35b1;
+    border-bottom: 1px dashed #d1c4e9;
+    padding-bottom: 5px;
+  }
+  .drag-trans-src {
+    font-size: 13px;
+    color: #555;
+    line-height: 1.35;
+    max-height: 60px;
+    overflow-y: auto;
+    word-break: break-word;
+  }
+  .drag-trans-ko {
+    font-size: 17px;
+    font-weight: bold;
+    color: #1b5e20;
+    line-height: 1.45;
+    word-break: keep-all;
+    white-space: pre-wrap;
+  }
+
   @media (max-width: 640px) {
     .app-container { padding: 10px; }
     .question-word { font-size: 34px; }
@@ -777,6 +842,22 @@
       <button type="button" onclick="closeAiModal()">닫기 (Esc)</button>
     </div>
   </div>
+</div>
+
+<!-- 단어 호버 자동해석 툴팁 -->
+<div class="hover-trans-tooltip" id="hoverTransTooltip"></div>
+
+<!-- 드래그(스크랩) 자동해석 팝업 -->
+<div class="drag-trans-popup" id="dragTransPopup">
+  <div class="drag-trans-header">
+    <span>🌐 선택 구간 자동 해석</span>
+    <div style="display:flex; gap:4px;">
+      <button type="button" class="btn-green" style="padding:2px 7px; font-size:12px;" onclick="speakDraggedSelection()">🔊 듣기</button>
+      <button type="button" style="padding:2px 7px; font-size:12px;" onclick="hideDragTransPopup()">✕</button>
+    </div>
+  </div>
+  <div class="drag-trans-src" id="dragTransSrc"></div>
+  <div class="drag-trans-ko" id="dragTransKo"></div>
 </div>
 
 <script>
@@ -1695,6 +1776,7 @@ let currentExampleWordStarts = [];
 
 function clearExampleKaraoke() {
   karaokeSessionId++;
+  cancelHoverWordTranslate();
   if (karaokeFallbackTimer) {
     clearInterval(karaokeFallbackTimer);
     karaokeFallbackTimer = null;
@@ -1747,7 +1829,18 @@ function renderClickableExampleText(exTextEl, text) {
       span.textContent = token;
       span.onclick = function(e) {
         e.stopPropagation();
+        const selText = window.getSelection ? window.getSelection().toString().trim() : "";
+        if (selText.length > 0 || (Date.now() - lastDragSelectTime < 250)) {
+          return;
+        }
+        hideDragTransPopup();
         speakExampleFromWordIndex(wordIdx);
+      };
+      span.onmouseenter = function(e) {
+        scheduleHoverWordTranslate(span, token);
+      };
+      span.onmouseleave = function() {
+        cancelHoverWordTranslate();
       };
       exTextEl.appendChild(span);
       currentExampleWordSpans.push(span);
@@ -1890,6 +1983,207 @@ function speakText(text) {
     currentAudio.play().catch(function(){});
   } catch (e) {}
 }
+
+// --- 3-2. 단어 호버 자동해석 & 드래그(스크랩) 문장 자동해석 ---
+const quickTransCache = {};
+let hoverTransTimer = null;
+let hoverTransSeq = 0;
+let dragTransSeq = 0;
+let lastDragSelectTime = 0;
+let lastDraggedEnglishText = "";
+
+function cleanWordForLookup(rawToken) {
+  if (!rawToken) return "";
+  return rawToken.replace(/^[^a-zA-Z]+|[^a-zA-Z'-]+$/g, "").trim();
+}
+
+function positionFixedBox(el, rect, preferAbove) {
+  el.style.visibility = "hidden";
+  el.style.display = el.classList.contains("drag-trans-popup") ? "flex" : "block";
+  const boxW = el.offsetWidth || 220;
+  const boxH = el.offsetHeight || 40;
+  const margin = 10;
+
+  let left = rect.left + (rect.width / 2) - (boxW / 2);
+  if (left < margin) left = margin;
+  if (left + boxW > window.innerWidth - margin) {
+    left = Math.max(margin, window.innerWidth - boxW - margin);
+  }
+
+  let top;
+  if (preferAbove) {
+    top = rect.top - boxH - 8;
+    if (top < margin) top = rect.bottom + 8;
+  } else {
+    top = rect.bottom + 8;
+    if (top + boxH > window.innerHeight - margin) {
+      top = Math.max(margin, rect.top - boxH - 8);
+    }
+  }
+
+  el.style.left = Math.round(left) + "px";
+  el.style.top = Math.round(top) + "px";
+  el.style.visibility = "visible";
+}
+
+function cancelHoverWordTranslate() {
+  if (hoverTransTimer) {
+    clearTimeout(hoverTransTimer);
+    hoverTransTimer = null;
+  }
+  hoverTransSeq++;
+  const tip = document.getElementById("hoverTransTooltip");
+  if (tip) tip.style.display = "none";
+}
+
+function scheduleHoverWordTranslate(spanEl, rawToken) {
+  // 드래그 선택 팝업이 떠 있거나 마우스 버튼을 누른 채 드래그 중이면 호버 툴팁 생략
+  const dragPopup = document.getElementById("dragTransPopup");
+  if (dragPopup && dragPopup.style.display === "flex") return;
+
+  const clean = cleanWordForLookup(rawToken);
+  if (!clean || clean.length < 2) return;
+
+  if (hoverTransTimer) clearTimeout(hoverTransTimer);
+  const mySeq = ++hoverTransSeq;
+
+  hoverTransTimer = setTimeout(async function() {
+    const tip = document.getElementById("hoverTransTooltip");
+    if (!tip || mySeq !== hoverTransSeq) return;
+
+    const cacheKey = "w:" + clean.toLowerCase();
+    const rect = spanEl.getBoundingClientRect();
+
+    if (quickTransCache[cacheKey]) {
+      tip.innerHTML = '<span class="hover-trans-word">' + escapeHtmlSimple(clean) + '</span>' + escapeHtmlSimple(quickTransCache[cacheKey]);
+      positionFixedBox(tip, rect, true);
+      return;
+    }
+
+    tip.innerHTML = '<span class="hover-trans-word">' + escapeHtmlSimple(clean) + '</span>⏳ 해석 중...';
+    positionFixedBox(tip, rect, true);
+
+    const res = await fetchTranslationDetailed(clean, "en", "ko");
+    let koText = res.main || "";
+    if (res.extra) {
+      const firstLine = res.extra.split("\n")[0].replace(/^\[[^\]]+\]\s*/, "").trim();
+      if (firstLine && firstLine.indexOf(koText) !== -1) {
+        koText = firstLine.split(",").slice(0, 3).map(function(s) { return s.trim(); }).join(", ");
+      }
+    }
+    if (!koText) {
+      koText = await fetchKoreanTranslation(clean);
+    }
+
+    if (koText) {
+      quickTransCache[cacheKey] = koText;
+    }
+    if (mySeq !== hoverTransSeq) return;
+    if (koText) {
+      tip.innerHTML = '<span class="hover-trans-word">' + escapeHtmlSimple(clean) + '</span>' + escapeHtmlSimple(koText);
+      positionFixedBox(tip, spanEl.getBoundingClientRect(), true);
+    } else {
+      tip.style.display = "none";
+    }
+  }, 180);
+}
+
+function escapeHtmlSimple(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function hideDragTransPopup() {
+  dragTransSeq++;
+  const popup = document.getElementById("dragTransPopup");
+  if (popup) popup.style.display = "none";
+}
+
+function speakDraggedSelection() {
+  if (lastDraggedEnglishText) {
+    speakText(lastDraggedEnglishText);
+  }
+}
+
+async function handleTextSelectionTranslate() {
+  const sel = window.getSelection ? window.getSelection() : null;
+  if (!sel || sel.isCollapsed) return;
+
+  const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
+  if (activeTag === "input" || activeTag === "textarea") return;
+
+  const selectedText = sel.toString().replace(/\s+/g, " ").trim();
+  // 영문이 포함된 2자~400자 텍스트만 자동 번역
+  if (selectedText.length < 2 || selectedText.length > 400 || !/[a-zA-Z]/.test(selectedText)) {
+    return;
+  }
+
+  // 팝업 내부 텍스트를 드래그한 경우는 무시
+  const popup = document.getElementById("dragTransPopup");
+  if (popup && sel.anchorNode && popup.contains(sel.anchorNode)) return;
+
+  let rect = null;
+  try {
+    rect = sel.getRangeAt(0).getBoundingClientRect();
+  } catch (e) {}
+  if (!rect || (rect.width === 0 && rect.height === 0)) return;
+
+  lastDragSelectTime = Date.now();
+  lastDraggedEnglishText = selectedText;
+  cancelHoverWordTranslate();
+
+  const srcEl = document.getElementById("dragTransSrc");
+  const koEl = document.getElementById("dragTransKo");
+  if (!popup || !srcEl || !koEl) return;
+
+  srcEl.textContent = selectedText;
+  const cacheKey = "s:" + selectedText.toLowerCase();
+  const mySeq = ++dragTransSeq;
+
+  if (quickTransCache[cacheKey]) {
+    koEl.textContent = quickTransCache[cacheKey];
+    positionFixedBox(popup, rect, false);
+    return;
+  }
+
+  koEl.textContent = "⏳ 자동 해석 중...";
+  positionFixedBox(popup, rect, false);
+
+  const translated = await fetchKoreanTranslation(selectedText);
+  if (translated) {
+    quickTransCache[cacheKey] = translated;
+  }
+  if (mySeq !== dragTransSeq) return;
+  if (translated) {
+    koEl.textContent = translated;
+    positionFixedBox(popup, rect, false);
+  } else {
+    koEl.textContent = "해석을 불러오지 못했습니다.";
+  }
+}
+
+document.addEventListener("mousedown", function(e) {
+  cancelHoverWordTranslate();
+  const popup = document.getElementById("dragTransPopup");
+  if (popup && popup.style.display === "flex" && !popup.contains(e.target)) {
+    hideDragTransPopup();
+  }
+});
+
+document.addEventListener("mouseup", function(e) {
+  const popup = document.getElementById("dragTransPopup");
+  if (popup && popup.contains(e.target)) return;
+  setTimeout(handleTextSelectionTranslate, 15);
+});
+
+document.addEventListener("touchend", function(e) {
+  const popup = document.getElementById("dragTransPopup");
+  if (popup && popup.contains(e.target)) return;
+  setTimeout(handleTextSelectionTranslate, 180);
+});
 
 // --- 4. 상단 UI 및 단어장 관리 ---
 function updateDeckSelectUI() {
@@ -2342,6 +2636,8 @@ function resetDeckWords() {
 
 // --- 8. 퀴즈 화면 로직 ---
 function loadQuestionAtCurrentIndex() {
+  cancelHoverWordTranslate();
+  hideDragTransPopup();
   const feedbackEl = document.getElementById("feedbackLabel");
   feedbackEl.textContent = "";
   optionsVisible = false;
@@ -2940,6 +3236,15 @@ window.addEventListener("keydown", function(e) {
   }
   if (document.getElementById("targetModal").style.display === "flex" ||
       document.getElementById("cloudModal").style.display === "flex") return;
+
+  if (e.code === "Escape") {
+    const dp = document.getElementById("dragTransPopup");
+    if (dp && dp.style.display === "flex") {
+      e.preventDefault();
+      hideDragTransPopup();
+      return;
+    }
+  }
 
   if (e.key === "t" || e.key === "T" || e.key === "ㅅ" || e.code === "KeyT") {
     e.preventDefault();
