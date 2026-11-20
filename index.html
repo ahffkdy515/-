@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.7 Web (정답 1개 암기 모드)</title>
+<title>나만의 영단어 암기 게임 v7.10 Web (예문 1.5배 확대)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -192,7 +192,7 @@
     margin-bottom: 4px;
   }
   .example-text {
-    font-size: 16px;
+    font-size: 24px;
     color: #311b92;
     line-height: 1.45;
     flex: 1;
@@ -211,9 +211,21 @@
     flex: 1;
   }
   .word-item-ex {
-    font-size: 13px;
+    font-size: 19.5px;
     color: #5e35b1;
     font-weight: normal;
+  }
+  .saved-badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: bold;
+    color: #1b5e20;
+    background: #c8e6c9;
+    border: 1px solid #81c784;
+    border-radius: 12px;
+    padding: 1px 8px;
+    margin-left: 8px;
+    vertical-align: middle;
   }
 
   /* 퀴즈 화면 */
@@ -427,6 +439,8 @@
   @media (max-width: 640px) {
     .app-container { padding: 10px; }
     .question-word { font-size: 34px; }
+    .example-text { font-size: 21px; }
+    .word-item-ex { font-size: 17px; }
     .reveal-btn, .option-btn { font-size: 17px; padding: 11px; }
     .quiz-info { font-size: 16px; width: 100%; order: -1; }
     .shortcut-banner { font-size: 12px; }
@@ -456,6 +470,7 @@
     <div class="deck-row">
       <select id="deckSelect" class="deck-select" onchange="onDeckChange()"></select>
       <button type="button" class="btn-blue" onclick="createDeck()">+ 새 노트 만들기</button>
+      <button type="button" onclick="renameDeck()">✏️ 이름 수정</button>
       <button type="button" class="btn-outline-red" onclick="deleteDeck()">노트 삭제</button>
     </div>
   </div>
@@ -580,7 +595,7 @@
       <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
         <span style="font-weight:bold; color:#e65100;" id="quizTargetLabel">저장될 곳: [오답노트 1]</span>
         <button type="button" class="btn-yellow" onclick="openTargetModal()">📌 오답노트 변경</button>
-        <button type="button" class="btn-orange" onclick="sendToDeck()">💾 오답노트에 세이브 (클릭 / S)</button>
+        <button type="button" class="btn-orange" id="quizBottomSaveBtn" onclick="sendToDeck()">💾 오답노트에 세이브 (클릭 / S)</button>
       </div>
       <button type="button" class="btn-red" onclick="deleteCurrentQuizWord()">🗑️ 현재 단어 삭제 (Delete)</button>
     </div>
@@ -814,6 +829,37 @@ function setExample(eng, exText) {
   }
 }
 
+function isWordInTargetDeck(eng) {
+  if (!eng || !targetDeck || targetDeck === currentDeck) return false;
+  const tDeck = decks[targetDeck];
+  return !!(tDeck && Object.prototype.hasOwnProperty.call(tDeck, eng));
+}
+
+function updateQuizSaveBtnUI() {
+  const saveBtn = document.getElementById("quizSaveBtn");
+  const bottomBtn = document.getElementById("quizBottomSaveBtn");
+  const alreadySaved = isWordInTargetDeck(currentQuestion);
+
+  if (saveBtn) {
+    if (alreadySaved) {
+      saveBtn.textContent = "✔️ [" + targetDeck + "]에 이미 세이브됨";
+      saveBtn.style.background = "#a5d6a7";
+    } else {
+      saveBtn.textContent = "💾 [" + targetDeck + "]에 세이브 (클릭 / S)";
+      saveBtn.style.background = "#ffb74d";
+    }
+  }
+  if (bottomBtn) {
+    if (alreadySaved) {
+      bottomBtn.textContent = "✔️ 이미 세이브됨";
+      bottomBtn.style.background = "#a5d6a7";
+    } else {
+      bottomBtn.textContent = "💾 오답노트에 세이브 (클릭 / S)";
+      bottomBtn.style.background = "#ffb74d";
+    }
+  }
+}
+
 // --- 3. 원어민 발음 재생 (브라우저 내장 TTS + 구글 TTS 폴백, 음성 겹침 완벽 방지) ---
 let currentAudio = null;
 function speakText(text) {
@@ -856,8 +902,6 @@ function updateDeckSelectUI() {
 
 function updateTargetUI() {
   document.getElementById("targetStatusLabel").textContent = "📌 현재 세이브 지정 디렉토리 : [" + targetDeck + "]";
-  const saveBtn = document.getElementById("quizSaveBtn");
-  if (saveBtn) saveBtn.textContent = "💾 [" + targetDeck + "]에 세이브 (클릭 / S)";
   const targetLbl = document.getElementById("quizTargetLabel");
   if (targetLbl) targetLbl.textContent = "저장될 곳: [" + targetDeck + "]";
   const autoChk = document.getElementById("autoSaveWrongChk");
@@ -868,6 +912,7 @@ function updateTargetUI() {
   if (hideChk) hideChk.checked = hideOptionsMode;
   const nextChk = document.getElementById("autoNextChk");
   if (nextChk) nextChk.checked = autoNextOnCorrect;
+  updateQuizSaveBtnUI();
 }
 
 function onAutoSaveToggle() {
@@ -942,6 +987,53 @@ function createDeck() {
   else showManageScreen();
 }
 
+function renameDeck() {
+  const oldName = currentDeck;
+  if (!oldName || !decks[oldName]) return;
+  const input = prompt("[" + oldName + "]의 새 이름을 입력하세요:", oldName);
+  if (input === null) return;
+  const newName = input.trim();
+  if (!newName || newName === oldName) return;
+  if (decks[newName]) {
+    alert("이미 존재하는 노트 이름입니다.");
+    return;
+  }
+
+  // 기존 순서를 유지하면서 키 이름 변경
+  const newDecks = {};
+  Object.keys(decks).forEach(function(key) {
+    if (key === oldName) {
+      newDecks[newName] = decks[oldName];
+    } else {
+      newDecks[key] = decks[key];
+    }
+  });
+  decks = newDecks;
+
+  // 진행 위치(progress) 이전
+  if (Object.prototype.hasOwnProperty.call(progress, oldName)) {
+    progress[newName] = progress[oldName];
+    delete progress[oldName];
+  }
+
+  currentDeck = newName;
+  if (targetDeck === oldName) {
+    targetDeck = newName;
+  }
+
+  saveAllState();
+  updateDeckSelectUI();
+  updateTargetUI();
+
+  if (inQuizMode) {
+    const engWords = Object.keys(decks[currentDeck] || {});
+    const idx = getCurrentIndex();
+    document.getElementById("quizInfoLabel").textContent = "[" + currentDeck + "]  " + (idx + 1) + " / " + engWords.length + "번째 단어";
+  } else {
+    document.getElementById("addBoxTitle").textContent = "[" + currentDeck + "]에 새 단어 등록";
+  }
+}
+
 function deleteDeck() {
   const keys = Object.keys(decks);
   if (keys.length <= 1) {
@@ -998,6 +1090,7 @@ function confirmTargetSelection() {
   targetDeck = pendingTargetChoice;
   saveAllState();
   updateTargetUI();
+  if (!inQuizMode) refreshWordList();
   closeTargetModal();
 }
 
@@ -1114,6 +1207,12 @@ function refreshWordList() {
 
       const textSpan = document.createElement("span");
       textSpan.textContent = "[" + (idx + 1) + "]  " + eng + "  :  " + kor;
+      if (isWordInTargetDeck(eng)) {
+        const badge = document.createElement("span");
+        badge.className = "saved-badge";
+        badge.textContent = "✔️ 이미 세이브됨";
+        textSpan.appendChild(badge);
+      }
       contentDiv.appendChild(textSpan);
 
       if (ex) {
@@ -1175,6 +1274,7 @@ function saveSelectedWordsFromList() {
   });
   saveAllState();
   updateDeckSelectUI();
+  refreshWordList();
   alert("선택한 " + count + "개의 단어가 [" + targetDeck + "]에 세이브되었습니다!");
 }
 
@@ -1257,9 +1357,7 @@ function loadQuestionAtCurrentIndex() {
   document.getElementById("quizInfoLabel").textContent = "[" + currentDeck + "]  " + (idx + 1) + " / " + engWords.length + "번째 단어";
   document.getElementById("questionLabel").textContent = currentQuestion;
 
-  const saveBtn = document.getElementById("quizSaveBtn");
-  saveBtn.textContent = "💾 [" + targetDeck + "]에 세이브 (클릭 / S)";
-  saveBtn.style.background = "#ffb74d";
+  updateQuizSaveBtnUI();
 
   // 정답 1개만 구성
   currentOptions = [correctAnswer];
@@ -1586,17 +1684,20 @@ function sendToDeck() {
   }
   const eng = currentQuestion;
   const kor = decks[currentDeck][eng];
+  const alreadySaved = isWordInTargetDeck(eng);
   decks[targetDeck][eng] = kor;
   saveAllState();
   updateDeckSelectUI();
-
-  const saveBtn = document.getElementById("quizSaveBtn");
-  saveBtn.textContent = "✔️ [" + targetDeck + "]에 세이브 완료!";
-  saveBtn.style.background = "#a5d6a7";
+  updateQuizSaveBtnUI();
 
   const totalInTarget = Object.keys(decks[targetDeck]).length;
-  feedbackEl.textContent = "💾 [세이브 완료] '" + eng + "' 단어가 [" + targetDeck + "]에 저장되었습니다! (총 " + totalInTarget + "단어)";
-  feedbackEl.style.color = "#1565c0";
+  if (alreadySaved) {
+    feedbackEl.textContent = "✔️ 이미 [" + targetDeck + "]에 세이브된 단어입니다! (총 " + totalInTarget + "단어)";
+    feedbackEl.style.color = "#2e7d32";
+  } else {
+    feedbackEl.textContent = "💾 [세이브 완료] '" + eng + "' 단어가 [" + targetDeck + "]에 저장되었습니다! (총 " + totalInTarget + "단어)";
+    feedbackEl.style.color = "#1565c0";
+  }
 }
 
 function deleteCurrentQuizWord() {
