@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.23 Web (노래방 스타일 예문 재생 바 & 클릭 구간 재생)</title>
+<title>나만의 영단어 암기 게임 v7.24 Web (깔끔한 노란 하이라이트 & 흔들림 제거)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -220,22 +220,6 @@
   .ex-word.speaking {
     color: #111111;
     background-color: #ffe082;
-    box-shadow: inset -3px 0 0 #d81b60;
-    font-weight: bold;
-  }
-  .example-progress-track {
-    width: 100%;
-    height: 4px;
-    background: #e1bee7;
-    border-radius: 2px;
-    overflow: hidden;
-    display: none;
-  }
-  .example-progress-fill {
-    height: 100%;
-    width: 0%;
-    background: linear-gradient(90deg, #7b1fa2, #d81b60);
-    transition: width 0.15s linear;
   }
   .example-translation {
     font-size: 19px;
@@ -652,9 +636,6 @@
     <div class="example-box" id="quizExampleBox" style="display:none;">
       <div class="example-text-wrap">
         <div class="example-text" id="quizExampleText" title="원하는 단어를 클릭하면 그 위치부터 재생됩니다"></div>
-        <div class="example-progress-track" id="quizExampleProgressTrack">
-          <div class="example-progress-fill" id="quizExampleProgressFill"></div>
-        </div>
         <div class="example-translation" id="quizExampleTrans" style="display:none;"></div>
       </div>
       <div class="example-btns">
@@ -1721,10 +1702,7 @@ function clearExampleKaraoke() {
   currentExampleWordSpans.forEach(function(sp) {
     sp.classList.remove("spoken", "speaking");
   });
-  const track = document.getElementById("quizExampleProgressTrack");
-  const fill = document.getElementById("quizExampleProgressFill");
-  if (fill) fill.style.width = "0%";
-  if (track) track.style.display = "none";
+
 }
 
 function setKaraokeWordIndex(activeIdx) {
@@ -1742,13 +1720,7 @@ function setKaraokeWordIndex(activeIdx) {
       sp.classList.remove("spoken", "speaking");
     }
   }
-  const track = document.getElementById("quizExampleProgressTrack");
-  const fill = document.getElementById("quizExampleProgressFill");
-  if (track) track.style.display = "block";
-  if (fill) {
-    const pct = Math.min(100, Math.round(((activeIdx + 1) / total) * 100));
-    fill.style.width = pct + "%";
-  }
+
 }
 
 function renderClickableExampleText(exTextEl, text) {
