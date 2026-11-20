@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>영단어 암기웹 v7.25 Web (단어 호버 자동해석 & 드래그 문장 자동해석)</title>
+<title>나만의 영단어 암기 게임 v7.26 Web (예문 음성-하이라이트 싱크 보정)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -1770,21 +1770,42 @@ function updateQuizSaveBtnUI() {
 // --- 3. 원어민 발음 재생 (브라우저 내장 TTS + 구글 TTS 폴백, 노래방 스타일 예문 하이라이트 지원) ---
 let currentAudio = null;
 let karaokeFallbackTimer = null;
+let karaokePendingTimers = [];
 let karaokeSessionId = 0;
 let currentExampleWordSpans = [];
 let currentExampleWordStarts = [];
+const KARAOKE_AUDIO_LATENCY_MS = 140; // 브라우저 TTS 버퍼 출력 딜레이 보정
+
+function clearKaraokePendingTimers() {
+  while (karaokePendingTimers.length > 0) {
+    clearTimeout(karaokePendingTimers.pop());
+  }
+}
+
+function scheduleKaraokeHighlight(wordIdx, sessionId, delayMs) {
+  if (delayMs <= 0) {
+    if (sessionId === karaokeSessionId) setKaraokeWordIndex(wordIdx);
+    return;
+  }
+  const t = setTimeout(function() {
+    if (sessionId === karaokeSessionId) {
+      setKaraokeWordIndex(wordIdx);
+    }
+  }, delayMs);
+  karaokePendingTimers.push(t);
+}
 
 function clearExampleKaraoke() {
   karaokeSessionId++;
   cancelHoverWordTranslate();
+  clearKaraokePendingTimers();
   if (karaokeFallbackTimer) {
-    clearInterval(karaokeFallbackTimer);
+    clearTimeout(karaokeFallbackTimer);
     karaokeFallbackTimer = null;
   }
   currentExampleWordSpans.forEach(function(sp) {
     sp.classList.remove("spoken", "speaking");
   });
-
 }
 
 function setKaraokeWordIndex(activeIdx) {
@@ -1860,6 +1881,39 @@ function findWordIndexByCharPos(charPos) {
   return idx;
 }
 
+function estimateWordDurationMs(wordText) {
+  const clean = (wordText || "").replace(/[^a-zA-Z0-9]/g, "");
+  let ms = Math.max(200, clean.length * 62 + 95);
+  if (/[.,!?;:]$/.test(wordText || "")) ms += 170;
+  return ms;
+}
+
+function startFallbackWordStepper(startIdx, totalWords, mySession, isStoppedFn) {
+  let estIdx = startIdx;
+  function stepNext() {
+    if (mySession !== karaokeSessionId || (isStoppedFn && isStoppedFn())) {
+      karaokeFallbackTimer = null;
+      return;
+    }
+    const curText = currentExampleWordSpans[estIdx] ? currentExampleWordSpans[estIdx].textContent : "";
+    const waitMs = estimateWordDurationMs(curText);
+    karaokeFallbackTimer = setTimeout(function() {
+      if (mySession !== karaokeSessionId || (isStoppedFn && isStoppedFn())) {
+        karaokeFallbackTimer = null;
+        return;
+      }
+      estIdx++;
+      if (estIdx < totalWords) {
+        setKaraokeWordIndex(estIdx);
+        stepNext();
+      } else {
+        karaokeFallbackTimer = null;
+      }
+    }, waitMs);
+  }
+  stepNext();
+}
+
 function speakExampleFromWordIndex(startWordIdx) {
   const fullText = currentDisplayedExample || getExample(currentQuestion);
   if (!fullText) return;
@@ -1874,7 +1928,6 @@ function speakExampleFromWordIndex(startWordIdx) {
 
   clearExampleKaraoke();
   const mySession = ++karaokeSessionId;
-  setKaraokeWordIndex(safeStart);
 
   try {
     if ("speechSynthesis" in window) {
@@ -1884,23 +1937,38 @@ function speakExampleFromWordIndex(startWordIdx) {
       utter.rate = 0.95;
 
       let boundaryFired = false;
+
+      // 실제 음성이 시작(onstart)된 뒤에 첫 단어 하이라이트 & 폴백 타이머 시작
+      utter.onstart = function() {
+        if (mySession !== karaokeSessionId) return;
+        scheduleKaraokeHighlight(safeStart, mySession, KARAOKE_AUDIO_LATENCY_MS);
+        const fbStart = setTimeout(function() {
+          if (mySession !== karaokeSessionId || boundaryFired) return;
+          startFallbackWordStepper(safeStart, totalWords, mySession, function() { return boundaryFired; });
+        }, KARAOKE_AUDIO_LATENCY_MS);
+        karaokePendingTimers.push(fbStart);
+      };
+
       utter.onboundary = function(e) {
         if (mySession !== karaokeSessionId) return;
         if (typeof e.charIndex === "number") {
           boundaryFired = true;
           if (karaokeFallbackTimer) {
-            clearInterval(karaokeFallbackTimer);
+            clearTimeout(karaokeFallbackTimer);
             karaokeFallbackTimer = null;
           }
           const absChar = charOffset + e.charIndex;
           const wIdx = findWordIndexByCharPos(absChar);
-          setKaraokeWordIndex(wIdx);
+          scheduleKaraokeHighlight(wIdx, mySession, KARAOKE_AUDIO_LATENCY_MS);
         }
       };
 
       utter.onend = function() {
         if (mySession !== karaokeSessionId) return;
-        clearExampleKaraoke();
+        const endT = setTimeout(function() {
+          if (mySession === karaokeSessionId) clearExampleKaraoke();
+        }, KARAOKE_AUDIO_LATENCY_MS);
+        karaokePendingTimers.push(endT);
       };
 
       utter.onerror = function() {
@@ -1908,29 +1976,12 @@ function speakExampleFromWordIndex(startWordIdx) {
         clearExampleKaraoke();
       };
 
-      // onboundary 미지원 모바일 브라우저용 추정 타이머 폴백
-      let estIdx = safeStart;
-      karaokeFallbackTimer = setInterval(function() {
-        if (mySession !== karaokeSessionId || boundaryFired) {
-          clearInterval(karaokeFallbackTimer);
-          karaokeFallbackTimer = null;
-          return;
-        }
-        estIdx++;
-        if (estIdx < totalWords) {
-          setKaraokeWordIndex(estIdx);
-        } else {
-          clearInterval(karaokeFallbackTimer);
-          karaokeFallbackTimer = null;
-        }
-      }, 360);
-
       window.speechSynthesis.speak(utter);
       return;
     }
   } catch (e) {}
 
-  // speechSynthesis 불가 시 구글 TTS 폴백 + 추정 바 이동
+  // speechSynthesis 불가 시 구글 TTS 폴백 -> 실제 오디오 재생(onplaying) 시점에 맞춰 시작
   try {
     if (currentAudio) {
       currentAudio.pause();
@@ -1938,16 +1989,11 @@ function speakExampleFromWordIndex(startWordIdx) {
     }
     const url = "https://translate.google.com/translate_tts?ie=UTF-8&client=gtx&tl=en-US&q=" + encodeURIComponent(subText);
     currentAudio = new Audio(url);
-    let estIdx = safeStart;
-    karaokeFallbackTimer = setInterval(function() {
-      if (mySession !== karaokeSessionId) {
-        clearInterval(karaokeFallbackTimer);
-        karaokeFallbackTimer = null;
-        return;
-      }
-      estIdx++;
-      if (estIdx < totalWords) setKaraokeWordIndex(estIdx);
-    }, 360);
+    currentAudio.onplaying = function() {
+      if (mySession !== karaokeSessionId) return;
+      setKaraokeWordIndex(safeStart);
+      startFallbackWordStepper(safeStart, totalWords, mySession, null);
+    };
     currentAudio.onended = function() {
       if (mySession === karaokeSessionId) clearExampleKaraoke();
     };
