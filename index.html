@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.6 Web (보기 가리기 & 자동 넘김 설정)</title>
+<title>나만의 영단어 암기 게임 v7.7 Web (정답 1개 암기 모드)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -537,7 +537,7 @@
   <!-- 화면 2: 퀴즈 화면 -->
   <div id="quizScreen" style="display:flex; flex-direction:column; gap:8px; flex:1;">
     <div class="shortcut-banner">
-      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [◀/▶] 이전·다음 | [Space] 보기 표시 | [1~4] 정답 | [S] 오답노트 | [E] 예문 추가/수정
+      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답 보기 / 다음 단어 | [◀/▶] 이전·다음 | [S] 오답노트 | [E] 예문 추가/수정
     </div>
 
     <div class="quiz-nav">
@@ -567,14 +567,11 @@
     </div>
 
     <button type="button" class="reveal-btn" id="revealBtn" onclick="revealOptions()">
-      [ 객관식 보기 표시 (클릭 / 터치 / Space) ]
+      [ 정답 보기 (클릭 / 터치 / Space) ]
     </button>
 
     <div class="options-list">
-      <button type="button" class="option-btn" id="optBtn0" onclick="checkAnswer(0)" disabled>1. [ ? ] 보기 가려짐</button>
-      <button type="button" class="option-btn" id="optBtn1" onclick="checkAnswer(1)" disabled>2. [ ? ] 보기 가려짐</button>
-      <button type="button" class="option-btn" id="optBtn2" onclick="checkAnswer(2)" disabled>3. [ ? ] 보기 가려짐</button>
-      <button type="button" class="option-btn" id="optBtn3" onclick="checkAnswer(3)" disabled>4. [ ? ] 보기 가려짐</button>
+      <button type="button" class="option-btn" id="optBtn0" onclick="checkAnswer(0)" disabled style="text-align:center; font-size:22px; font-weight:bold; padding:18px 16px;">[ ? ] 정답 가려짐</button>
     </div>
 
     <div class="feedback-area" id="feedbackLabel"></div>
@@ -1264,31 +1261,13 @@ function loadQuestionAtCurrentIndex() {
   saveBtn.textContent = "💾 [" + targetDeck + "]에 세이브 (클릭 / S)";
   saveBtn.style.background = "#ffb74d";
 
-  // 오답 보기 풀 구성
-  let poolMeanings = Array.from(new Set(Object.values(words)));
-  if (poolMeanings.length < 4) {
-    Object.values(decks).forEach(function(d) {
-      poolMeanings.push.apply(poolMeanings, Object.values(d));
-    });
-    poolMeanings = Array.from(new Set(poolMeanings));
-  }
-  poolMeanings = poolMeanings.filter(function(m) { return m !== correctAnswer; });
-
-  // 무작위 3개 추출
-  const shuffledPool = poolMeanings.sort(function() { return Math.random() - 0.5; });
-  const wrongAnswers = shuffledPool.slice(0, 3);
-  while (wrongAnswers.length < 3) {
-    wrongAnswers.push("임시 오답 보기 " + (wrongAnswers.length + 1));
-  }
-
-  currentOptions = wrongAnswers.concat([correctAnswer]).sort(function() { return Math.random() - 0.5; });
+  // 정답 1개만 구성
+  currentOptions = [correctAnswer];
 
   if (hideOptionsMode) {
     hideOptionsUI();
   } else {
-    for (let i = 0; i < 4; i++) {
-      document.getElementById("optBtn" + i).style.background = "#ffffff";
-    }
+    document.getElementById("optBtn0").style.background = "#ffffff";
     revealOptions();
   }
 
@@ -1300,16 +1279,14 @@ function hideOptionsUI() {
   optionsVisible = false;
   const revealBtn = document.getElementById("revealBtn");
   revealBtn.style.display = "block";
-  revealBtn.textContent = "[ 객관식 보기 표시 (클릭 / 터치 / Space) ]";
+  revealBtn.textContent = "[ 정답 보기 (클릭 / 터치 / Space) ]";
   revealBtn.disabled = false;
   revealBtn.style.background = "#bbdefb";
 
-  for (let i = 0; i < 4; i++) {
-    const btn = document.getElementById("optBtn" + i);
-    btn.textContent = (i + 1) + ". [ ? ] 보기 가려짐";
-    btn.disabled = true;
-    btn.style.background = "#ffffff";
-  }
+  const btn = document.getElementById("optBtn0");
+  btn.textContent = "[ ? ] 정답 가려짐";
+  btn.disabled = true;
+  btn.style.background = "#ffffff";
 }
 
 function updateQuizExampleUI() {
@@ -1503,16 +1480,15 @@ function revealOptions() {
     revealBtn.style.display = "none";
   } else {
     revealBtn.style.display = "block";
-    revealBtn.textContent = "보기가 표시되었습니다 (클릭 / 터치 또는 1~4번 키 선택)";
+    revealBtn.textContent = "정답이 표시되었습니다 (Space / Enter / ▶ 로 다음 단어)";
     revealBtn.disabled = true;
     revealBtn.style.background = "#e0e0e0";
   }
 
-  for (let i = 0; i < 4; i++) {
-    const btn = document.getElementById("optBtn" + i);
-    btn.textContent = (i + 1) + ". " + currentOptions[i];
-    btn.disabled = false;
-  }
+  const btn = document.getElementById("optBtn0");
+  btn.textContent = currentOptions[0];
+  btn.disabled = false;
+  btn.style.background = "#e8f5e9";
 }
 
 function checkAnswer(idx) {
@@ -1523,18 +1499,16 @@ function checkAnswer(idx) {
 
   if (selected === correct) {
     currentAnsweredCorrectly = true;
-    document.getElementById("optBtn" + idx).style.background = "#c8e6c9";
-    for (let i = 0; i < 4; i++) {
-      document.getElementById("optBtn" + i).disabled = true;
-    }
+    document.getElementById("optBtn0").style.background = "#c8e6c9";
+    document.getElementById("optBtn0").disabled = true;
     if (autoNextOnCorrect) {
-      feedbackEl.textContent = "⭕ 정답입니다!";
+      feedbackEl.textContent = "⭕ 확인 완료!";
       feedbackEl.style.color = "#2e7d32";
       setTimeout(function() {
         advanceAndNext();
       }, 220);
     } else {
-      feedbackEl.textContent = "⭕ 정답입니다! [▶ / Space / Enter]로 다음 단어로 이동하세요.";
+      feedbackEl.textContent = "⭕ 확인 완료! [▶ / Space / Enter]로 다음 단어로 이동하세요.";
       feedbackEl.style.color = "#2e7d32";
     }
   } else {
@@ -1669,13 +1643,13 @@ window.addEventListener("keydown", function(e) {
   if (inQuizMode) {
     if (e.code === "Space") {
       e.preventDefault();
-      if (currentAnsweredCorrectly && !autoNextOnCorrect) {
-        advanceAndNext();
-      } else if (!optionsVisible) {
+      if (!optionsVisible) {
         revealOptions();
+      } else {
+        advanceAndNext();
       }
     } else if (e.code === "Enter") {
-      if (currentAnsweredCorrectly && !autoNextOnCorrect) {
+      if (optionsVisible) {
         e.preventDefault();
         advanceAndNext();
       }
@@ -1691,12 +1665,14 @@ window.addEventListener("keydown", function(e) {
     } else if (e.key === "e" || e.key === "E" || e.key === "ㄷ" || e.code === "KeyE") {
       e.preventDefault();
       openExampleModal(currentQuestion);
-    } else if (["1", "2", "3", "4"].includes(e.key)) {
+    } else if (e.key === "1") {
       e.preventDefault();
-      const idx = parseInt(e.key, 10) - 1;
-      if (!optionsVisible) revealOptions();
-      const btn = document.getElementById("optBtn" + idx);
-      if (btn && !btn.disabled) checkAnswer(idx);
+      if (!optionsVisible) {
+        revealOptions();
+      } else {
+        const btn = document.getElementById("optBtn0");
+        if (btn && !btn.disabled) checkAnswer(0);
+      }
     } else if (e.code === "Delete") {
       e.preventDefault();
       deleteCurrentQuizWord();
