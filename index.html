@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.19 Web (Gemini AI 타임아웃 해결 & 고속 연결)</title>
+<title>나만의 영단어 암기 게임 v7.20 Web (UI 정리 & Space 예문 읽기)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -523,10 +523,6 @@
   <div class="target-bar">
     <div class="target-label" id="targetStatusLabel">📌 현재 세이브 지정 디렉토리 : [오답노트 1]</div>
     <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
-      <label style="display:flex; align-items:center; gap:5px; font-size:14px; font-weight:bold; color:#bf360c; cursor:pointer; user-select:none;">
-        <input type="checkbox" id="autoSaveWrongChk" checked onchange="onAutoSaveToggle()" style="width:17px; height:17px; cursor:pointer;">
-        오답 시 자동 세이브
-      </label>
       <label style="display:flex; align-items:center; gap:5px; font-size:14px; font-weight:bold; color:#4527a0; cursor:pointer; user-select:none;">
         <input type="checkbox" id="autoExampleChk" checked onchange="onAutoExampleToggle()" style="width:17px; height:17px; cursor:pointer;">
         자동 예문
@@ -597,7 +593,7 @@
   <!-- 화면 2: 퀴즈 화면 -->
   <div id="quizScreen" style="display:flex; flex-direction:column; gap:8px; flex:1;">
     <div class="shortcut-banner">
-      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답·예문 읽기 / 다음 | [Z] 예문 듣기 | [◀/▶] 이전·다음 | [S] 오답노트 | [E] 예문 | [T] 번역기
+      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답 보기 / 예문 읽기 | [Z] 예문 듣기 | [◀/▶] 이전·다음 | [S] 오답노트 | [T] 번역기
     </div>
 
     <div class="quiz-nav">
@@ -614,7 +610,6 @@
       <div class="question-side-btns">
         <button type="button" class="btn-green" onclick="speakText(currentQuestion)">🔊 발음 다시 듣기</button>
         <button type="button" class="btn-orange" id="quizSaveBtn" onclick="sendToDeck()">💾 [오답노트 1]에 세이브 (클릭 / S)</button>
-        <button type="button" class="btn-purple" id="quizExampleBtn" onclick="openExampleModal(currentQuestion)">📝 예문 추가 (E)</button>
       </div>
     </div>
 
@@ -2201,14 +2196,14 @@ function renderQuizExample(word, exText, isManual) {
   const exTextEl = document.getElementById("quizExampleText");
   const exBtn = document.getElementById("quizExampleBtn");
   const transEl = document.getElementById("quizExampleTrans");
-  if (!exBox || !exTextEl || !exBtn) return;
+  if (!exBox || !exTextEl) return;
 
   updateRefreshExampleBtnLabel(word);
   currentDisplayedExample = exText || "";
   if (currentDisplayedExample) {
     exTextEl.textContent = "📝 " + currentDisplayedExample;
     exBox.style.display = "flex";
-    exBtn.textContent = isManual ? "📝 예문 수정 (E)" : "📝 예문 직접 수정 (E)";
+    if (exBtn) exBtn.textContent = isManual ? "📝 예문 수정 (E)" : "📝 예문 직접 수정 (E)";
     if (optionsVisible) {
       updateQuizExampleTranslationUI();
       if (pendingSpeakExampleWord === word) {
@@ -2222,7 +2217,7 @@ function renderQuizExample(word, exText, isManual) {
   } else {
     exTextEl.textContent = "";
     exBox.style.display = "none";
-    exBtn.textContent = "📝 예문 추가 (E)";
+    if (exBtn) exBtn.textContent = "📝 예문 추가 (E)";
     if (transEl) {
       transEl.style.display = "none";
       transEl.textContent = "";
@@ -2235,7 +2230,7 @@ function updateQuizExampleUI(forceDifferent) {
   const exTextEl = document.getElementById("quizExampleText");
   const exBtn = document.getElementById("quizExampleBtn");
   const transEl = document.getElementById("quizExampleTrans");
-  if (!exBox || !exTextEl || !exBtn) return;
+  if (!exBox || !exTextEl) return;
 
   // 진행 중인 이전 예문 요청 취소
   if (currentExampleAbortController) {
@@ -2289,7 +2284,7 @@ function updateQuizExampleUI(forceDifferent) {
     updateRefreshExampleBtnLabel(word);
     exTextEl.textContent = "✨ AI가 새로운 예문 생성 중... (" + (savedAiList.length + 1) + "/" + MAX_SAVED_AI_EXAMPLES + ")";
     exBox.style.display = "flex";
-    exBtn.textContent = "📝 예문 직접 수정 (E)";
+    if (exBtn) exBtn.textContent = "📝 예문 직접 수정 (E)";
     autoFetchGeminiExampleForWord(word, kor, reqId, geminiKey);
     return;
   }
@@ -2459,7 +2454,7 @@ function revealOptions(fromInit) {
     revealBtn.style.display = "none";
   } else {
     revealBtn.style.display = "block";
-    revealBtn.textContent = "정답이 표시되었습니다 (Space / Enter / ▶ 로 다음 단어)";
+    revealBtn.textContent = "정답이 표시되었습니다 (Space: 예문 다시 읽기 | Enter / ▶: 다음 단어)";
     revealBtn.disabled = true;
     revealBtn.style.background = "#e0e0e0";
   }
@@ -2537,7 +2532,7 @@ function checkAnswer(idx) {
         advanceAndNext();
       }, 220);
     } else {
-      feedbackEl.textContent = "⭕ 확인 완료! [▶ / Space / Enter]로 다음 단어로 이동하세요.";
+      feedbackEl.textContent = "⭕ 확인 완료! [▶ / Enter]로 다음 단어로 이동하세요.";
       feedbackEl.style.color = "#2e7d32";
     }
   } else {
@@ -2698,7 +2693,7 @@ window.addEventListener("keydown", function(e) {
       if (!optionsVisible) {
         revealOptions();
       } else {
-        advanceAndNext();
+        speakCurrentExample();
       }
     } else if (e.code === "Enter") {
       if (optionsVisible) {
