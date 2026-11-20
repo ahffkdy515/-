@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.22 Web (A/D키 예문 이동 추가)</title>
+<title>나만의 영단어 암기 게임 v7.23 Web (노래방 스타일 예문 재생 바 & 클릭 구간 재생)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -199,9 +199,43 @@
   .example-text {
     font-size: 24px;
     color: #311b92;
-    line-height: 1.45;
+    line-height: 1.55;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+  .ex-word {
+    display: inline;
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 1px 2px;
+    transition: background-color 0.12s ease, color 0.12s ease;
+  }
+  .ex-word:hover {
+    background-color: #e1bee7;
+  }
+  .ex-word.spoken {
+    color: #7e57c2;
+    background-color: #ede7f6;
+  }
+  .ex-word.speaking {
+    color: #111111;
+    background-color: #ffe082;
+    box-shadow: inset -3px 0 0 #d81b60;
+    font-weight: bold;
+  }
+  .example-progress-track {
+    width: 100%;
+    height: 4px;
+    background: #e1bee7;
+    border-radius: 2px;
+    overflow: hidden;
+    display: none;
+  }
+  .example-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #7b1fa2, #d81b60);
+    transition: width 0.15s linear;
   }
   .example-translation {
     font-size: 19px;
@@ -617,7 +651,10 @@
 
     <div class="example-box" id="quizExampleBox" style="display:none;">
       <div class="example-text-wrap">
-        <div class="example-text" id="quizExampleText"></div>
+        <div class="example-text" id="quizExampleText" title="원하는 단어를 클릭하면 그 위치부터 재생됩니다"></div>
+        <div class="example-progress-track" id="quizExampleProgressTrack">
+          <div class="example-progress-fill" id="quizExampleProgressFill"></div>
+        </div>
         <div class="example-translation" id="quizExampleTrans" style="display:none;"></div>
       </div>
       <div class="example-btns">
@@ -1668,10 +1705,198 @@ function updateQuizSaveBtnUI() {
   }
 }
 
-// --- 3. 원어민 발음 재생 (브라우저 내장 TTS + 구글 TTS 폴백, 음성 겹침 완벽 방지) ---
+// --- 3. 원어민 발음 재생 (브라우저 내장 TTS + 구글 TTS 폴백, 노래방 스타일 예문 하이라이트 지원) ---
 let currentAudio = null;
+let karaokeFallbackTimer = null;
+let karaokeSessionId = 0;
+let currentExampleWordSpans = [];
+let currentExampleWordStarts = [];
+
+function clearExampleKaraoke() {
+  karaokeSessionId++;
+  if (karaokeFallbackTimer) {
+    clearInterval(karaokeFallbackTimer);
+    karaokeFallbackTimer = null;
+  }
+  currentExampleWordSpans.forEach(function(sp) {
+    sp.classList.remove("spoken", "speaking");
+  });
+  const track = document.getElementById("quizExampleProgressTrack");
+  const fill = document.getElementById("quizExampleProgressFill");
+  if (fill) fill.style.width = "0%";
+  if (track) track.style.display = "none";
+}
+
+function setKaraokeWordIndex(activeIdx) {
+  const total = currentExampleWordSpans.length;
+  if (total === 0) return;
+  for (let i = 0; i < total; i++) {
+    const sp = currentExampleWordSpans[i];
+    if (i < activeIdx) {
+      sp.classList.add("spoken");
+      sp.classList.remove("speaking");
+    } else if (i === activeIdx) {
+      sp.classList.remove("spoken");
+      sp.classList.add("speaking");
+    } else {
+      sp.classList.remove("spoken", "speaking");
+    }
+  }
+  const track = document.getElementById("quizExampleProgressTrack");
+  const fill = document.getElementById("quizExampleProgressFill");
+  if (track) track.style.display = "block";
+  if (fill) {
+    const pct = Math.min(100, Math.round(((activeIdx + 1) / total) * 100));
+    fill.style.width = pct + "%";
+  }
+}
+
+function renderClickableExampleText(exTextEl, text) {
+  clearExampleKaraoke();
+  currentExampleWordSpans = [];
+  currentExampleWordStarts = [];
+  exTextEl.innerHTML = "";
+
+  const prefix = document.createTextNode("📝 ");
+  exTextEl.appendChild(prefix);
+
+  // 단어와 공백을 분리해 각 단어를 클릭 가능한 span으로 생성
+  const regex = /(\S+|\s+)/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const token = match[0];
+    const startPos = match.index;
+    if (/^\s+$/.test(token)) {
+      exTextEl.appendChild(document.createTextNode(token));
+    } else {
+      const wordIdx = currentExampleWordSpans.length;
+      const span = document.createElement("span");
+      span.className = "ex-word";
+      span.textContent = token;
+      span.onclick = function(e) {
+        e.stopPropagation();
+        speakExampleFromWordIndex(wordIdx);
+      };
+      exTextEl.appendChild(span);
+      currentExampleWordSpans.push(span);
+      currentExampleWordStarts.push(startPos);
+    }
+  }
+}
+
+function findWordIndexByCharPos(charPos) {
+  const starts = currentExampleWordStarts;
+  if (starts.length === 0) return 0;
+  let idx = 0;
+  for (let i = 0; i < starts.length; i++) {
+    if (starts[i] <= charPos) idx = i;
+    else break;
+  }
+  return idx;
+}
+
+function speakExampleFromWordIndex(startWordIdx) {
+  const fullText = currentDisplayedExample || getExample(currentQuestion);
+  if (!fullText) return;
+  const totalWords = currentExampleWordSpans.length;
+  if (totalWords === 0) {
+    speakText(fullText);
+    return;
+  }
+  const safeStart = Math.max(0, Math.min(startWordIdx || 0, totalWords - 1));
+  const charOffset = currentExampleWordStarts[safeStart] || 0;
+  const subText = fullText.slice(charOffset);
+
+  clearExampleKaraoke();
+  const mySession = ++karaokeSessionId;
+  setKaraokeWordIndex(safeStart);
+
+  try {
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(subText);
+      utter.lang = "en-US";
+      utter.rate = 0.95;
+
+      let boundaryFired = false;
+      utter.onboundary = function(e) {
+        if (mySession !== karaokeSessionId) return;
+        if (typeof e.charIndex === "number") {
+          boundaryFired = true;
+          if (karaokeFallbackTimer) {
+            clearInterval(karaokeFallbackTimer);
+            karaokeFallbackTimer = null;
+          }
+          const absChar = charOffset + e.charIndex;
+          const wIdx = findWordIndexByCharPos(absChar);
+          setKaraokeWordIndex(wIdx);
+        }
+      };
+
+      utter.onend = function() {
+        if (mySession !== karaokeSessionId) return;
+        clearExampleKaraoke();
+      };
+
+      utter.onerror = function() {
+        if (mySession !== karaokeSessionId) return;
+        clearExampleKaraoke();
+      };
+
+      // onboundary 미지원 모바일 브라우저용 추정 타이머 폴백
+      let estIdx = safeStart;
+      karaokeFallbackTimer = setInterval(function() {
+        if (mySession !== karaokeSessionId || boundaryFired) {
+          clearInterval(karaokeFallbackTimer);
+          karaokeFallbackTimer = null;
+          return;
+        }
+        estIdx++;
+        if (estIdx < totalWords) {
+          setKaraokeWordIndex(estIdx);
+        } else {
+          clearInterval(karaokeFallbackTimer);
+          karaokeFallbackTimer = null;
+        }
+      }, 360);
+
+      window.speechSynthesis.speak(utter);
+      return;
+    }
+  } catch (e) {}
+
+  // speechSynthesis 불가 시 구글 TTS 폴백 + 추정 바 이동
+  try {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+    const url = "https://translate.google.com/translate_tts?ie=UTF-8&client=gtx&tl=en-US&q=" + encodeURIComponent(subText);
+    currentAudio = new Audio(url);
+    let estIdx = safeStart;
+    karaokeFallbackTimer = setInterval(function() {
+      if (mySession !== karaokeSessionId) {
+        clearInterval(karaokeFallbackTimer);
+        karaokeFallbackTimer = null;
+        return;
+      }
+      estIdx++;
+      if (estIdx < totalWords) setKaraokeWordIndex(estIdx);
+    }, 360);
+    currentAudio.onended = function() {
+      if (mySession === karaokeSessionId) clearExampleKaraoke();
+    };
+    currentAudio.play().catch(function() {
+      if (mySession === karaokeSessionId) clearExampleKaraoke();
+    });
+  } catch (e) {
+    clearExampleKaraoke();
+  }
+}
+
 function speakText(text) {
   if (!text) return;
+  clearExampleKaraoke();
   try {
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -2233,20 +2458,21 @@ function renderQuizExample(word, exText, isManual, fromHistoryNav) {
   updateRefreshExampleBtnLabel(word);
   currentDisplayedExample = trimmed;
   if (currentDisplayedExample) {
-    exTextEl.textContent = "📝 " + currentDisplayedExample;
+    renderClickableExampleText(exTextEl, currentDisplayedExample);
     exBox.style.display = "flex";
     if (exBtn) exBtn.textContent = isManual ? "📝 예문 수정 (E)" : "📝 예문 직접 수정 (E)";
     if (optionsVisible) {
       updateQuizExampleTranslationUI();
       if (pendingSpeakExampleWord === word) {
         pendingSpeakExampleWord = null;
-        speakText(currentDisplayedExample);
+        speakExampleFromWordIndex(0);
       }
     } else if (transEl) {
       transEl.style.display = "none";
       transEl.textContent = "";
     }
   } else {
+    clearExampleKaraoke();
     exTextEl.textContent = "";
     exBox.style.display = "none";
     if (exBtn) exBtn.textContent = "📝 예문 추가 (E)";
@@ -2403,7 +2629,7 @@ function prevAutoExample() {
 
 function speakCurrentExample() {
   const ex = currentDisplayedExample || getExample(currentQuestion);
-  if (ex) speakText(ex);
+  if (ex) speakExampleFromWordIndex(0);
 }
 
 function openExampleModal(eng) {
@@ -2532,7 +2758,7 @@ function revealOptions(fromInit) {
   if (!fromInit) {
     if (currentDisplayedExample) {
       pendingSpeakExampleWord = null;
-      speakText(currentDisplayedExample);
+      speakExampleFromWordIndex(0);
     } else if (autoFetchExample && currentQuestion) {
       pendingSpeakExampleWord = currentQuestion;
     }
