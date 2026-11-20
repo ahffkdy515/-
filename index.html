@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.10 Web (예문 1.5배 확대)</title>
+<title>나만의 영단어 암기 게임 v7.11 Web (정답 표시 시 예문 번역)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -191,11 +191,27 @@
     gap: 10px;
     margin-bottom: 4px;
   }
+  .example-text-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+  }
   .example-text {
     font-size: 24px;
     color: #311b92;
     line-height: 1.45;
-    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .example-translation {
+    font-size: 19px;
+    color: #1b5e20;
+    background: #e8f5e9;
+    border-left: 4px solid #66bb6a;
+    padding: 6px 10px;
+    border-radius: 4px;
+    line-height: 1.45;
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -440,6 +456,7 @@
     .app-container { padding: 10px; }
     .question-word { font-size: 34px; }
     .example-text { font-size: 21px; }
+    .example-translation { font-size: 16px; }
     .word-item-ex { font-size: 17px; }
     .reveal-btn, .option-btn { font-size: 17px; padding: 11px; }
     .quiz-info { font-size: 16px; width: 100%; order: -1; }
@@ -574,7 +591,10 @@
     </div>
 
     <div class="example-box" id="quizExampleBox" style="display:none;">
-      <div class="example-text" id="quizExampleText"></div>
+      <div class="example-text-wrap">
+        <div class="example-text" id="quizExampleText"></div>
+        <div class="example-translation" id="quizExampleTrans" style="display:none;"></div>
+      </div>
       <div class="example-btns">
         <button type="button" class="btn-green" style="padding:5px 10px; font-size:13px;" onclick="speakCurrentExample()">🔊 예문 듣기</button>
         <button type="button" class="btn-purple" style="padding:5px 10px; font-size:13px;" onclick="openExampleModal(currentQuestion)">✏️ 수정</button>
@@ -827,6 +847,67 @@ function setExample(eng, exText) {
     delete map[eng];
     delete map[eng.toLowerCase()];
   }
+}
+
+function getExampleTransMap() {
+  if (!progress["_example_trans"] || typeof progress["_example_trans"] !== "object") {
+    progress["_example_trans"] = {};
+  }
+  return progress["_example_trans"];
+}
+
+function getExampleTranslation(exText) {
+  if (!exText) return "";
+  const map = getExampleTransMap();
+  return map[exText.trim()] || "";
+}
+
+function setExampleTranslation(exText, koText) {
+  if (!exText) return;
+  const map = getExampleTransMap();
+  const key = exText.trim();
+  const val = (koText || "").trim();
+  if (val) {
+    map[key] = val;
+  } else {
+    delete map[key];
+  }
+}
+
+async function fetchKoreanTranslation(text) {
+  const q = (text || "").trim();
+  if (!q) return "";
+  // 1차: Google Translate 무료 엔드포인트 (3초 타임아웃)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 3000);
+    const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ko&dt=t&q=" + encodeURIComponent(q);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const translated = data[0].map(function(part) { return part[0] || ""; }).join("").trim();
+        if (translated) return translated;
+      }
+    }
+  } catch (e) {}
+
+  // 2차 폴백: MyMemory 무료 번역 API (3초 타임아웃)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 3000);
+    const url = "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(q) + "&langpair=en|ko";
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      const translated = data && data.responseData && data.responseData.translatedText ? data.responseData.translatedText.trim() : "";
+      if (translated) return translated;
+    }
+  } catch (e) {}
+
+  return "";
 }
 
 function isWordInTargetDeck(eng) {
@@ -1385,6 +1466,12 @@ function hideOptionsUI() {
   btn.textContent = "[ ? ] 정답 가려짐";
   btn.disabled = true;
   btn.style.background = "#ffffff";
+
+  const transEl = document.getElementById("quizExampleTrans");
+  if (transEl) {
+    transEl.style.display = "none";
+    transEl.textContent = "";
+  }
 }
 
 function updateQuizExampleUI() {
@@ -1399,7 +1486,13 @@ function updateQuizExampleUI() {
     exText.textContent = "📝 " + ex;
     exBox.style.display = "flex";
     exBtn.textContent = "📝 예문 수정 (E)";
+    updateQuizExampleTranslationUI();
     return;
+  }
+  const transEl = document.getElementById("quizExampleTrans");
+  if (transEl) {
+    transEl.style.display = "none";
+    transEl.textContent = "";
   }
 
   exBtn.textContent = "📝 예문 추가 (E)";
@@ -1445,6 +1538,7 @@ async function autoFetchExampleForWord(word) {
         if (exText) exText.textContent = "📝 " + foundEx;
         if (exBox) exBox.style.display = "flex";
         if (exBtn) exBtn.textContent = "📝 예문 수정 (E)";
+        updateQuizExampleTranslationUI();
       }
     } else {
       autoExampleNotFoundCache.add(wordKey);
@@ -1587,6 +1681,46 @@ function revealOptions() {
   btn.textContent = currentOptions[0];
   btn.disabled = false;
   btn.style.background = "#e8f5e9";
+
+  updateQuizExampleTranslationUI();
+}
+
+async function updateQuizExampleTranslationUI() {
+  const transEl = document.getElementById("quizExampleTrans");
+  if (!transEl) return;
+
+  const word = currentQuestion;
+  const ex = getExample(word);
+  if (!optionsVisible || !ex) {
+    transEl.style.display = "none";
+    transEl.textContent = "";
+    return;
+  }
+
+  const cached = getExampleTranslation(ex);
+  if (cached) {
+    transEl.textContent = "💬 " + cached;
+    transEl.style.display = "block";
+    return;
+  }
+
+  transEl.textContent = "⏳ 예문 번역 중...";
+  transEl.style.display = "block";
+
+  const translated = await fetchKoreanTranslation(ex);
+  if (translated) {
+    setExampleTranslation(ex, translated);
+    saveAllState();
+    if (inQuizMode && optionsVisible && currentQuestion === word && getExample(word) === ex) {
+      transEl.textContent = "💬 " + translated;
+      transEl.style.display = "block";
+    }
+  } else {
+    if (inQuizMode && currentQuestion === word) {
+      transEl.style.display = "none";
+      transEl.textContent = "";
+    }
+  }
 }
 
 function checkAnswer(idx) {
