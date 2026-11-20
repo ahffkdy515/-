@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.11 Web (정답 표시 시 예문 번역)</title>
+<title>나만의 영단어 암기 게임 v7.12 Web (자동 예문 생성 & 매번 다른 예문)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -596,6 +596,7 @@
         <div class="example-translation" id="quizExampleTrans" style="display:none;"></div>
       </div>
       <div class="example-btns">
+        <button type="button" class="btn-blue" style="padding:5px 10px; font-size:13px;" onclick="refreshAutoExample()">🔄 다른 예문</button>
         <button type="button" class="btn-green" style="padding:5px 10px; font-size:13px;" onclick="speakCurrentExample()">🔊 예문 듣기</button>
         <button type="button" class="btn-purple" style="padding:5px 10px; font-size:13px;" onclick="openExampleModal(currentQuestion)">✏️ 수정</button>
       </div>
@@ -699,7 +700,11 @@ let hideOptionsMode = true;
 let autoNextOnCorrect = false;
 let currentAnsweredCorrectly = false;
 let editingExampleWord = null;
-const autoExampleNotFoundCache = new Set();
+let currentDisplayedExample = "";
+let exampleRequestSeq = 0;
+let currentExampleAbortController = null;
+const autoExamplePoolCache = {}; // wordKey -> { examples: [...], pos: "..." }
+const lastShownExampleMap = {};  // wordKey -> last shown example string
 
 // 로컬 파일(file://)이나 사파리 사생활 보호 모드 등에서 localStorage 차단 시에도 멈추지 않도록 안전 래퍼 사용
 function safeGetStorage(key) {
@@ -837,16 +842,126 @@ function getExample(eng) {
   return map[eng] || map[eng.toLowerCase()] || "";
 }
 
-function setExample(eng, exText) {
+function getManualExamplesMap() {
+  if (!progress["_manual_examples"] || typeof progress["_manual_examples"] !== "object") {
+    progress["_manual_examples"] = {};
+  }
+  return progress["_manual_examples"];
+}
+
+function isManualExample(eng) {
+  if (!eng) return false;
+  const m = getManualExamplesMap();
+  return !!(m[eng] || m[eng.toLowerCase()]);
+}
+
+function setExample(eng, exText, isManual) {
   if (!eng) return;
   const map = getExamplesMap();
+  const manualMap = getManualExamplesMap();
   const trimmed = (exText || "").trim();
   if (trimmed) {
     map[eng] = trimmed;
+    if (isManual) manualMap[eng] = true;
   } else {
     delete map[eng];
     delete map[eng.toLowerCase()];
+    delete manualMap[eng];
+    delete manualMap[eng.toLowerCase()];
   }
+}
+
+function detectPosFromKorean(kor) {
+  const k = (kor || "").split(/[,;/]/)[0].trim();
+  if (!k) return "noun";
+  if (/(하다|되다|시키다|받다|주다|지다|나다|오다|가다|다)$/.test(k) && !/(보다|마다)$/.test(k)) {
+    return "verb";
+  }
+  if (/(적인|스러운|로운|있는|없는|한|의|운|인)$/.test(k)) {
+    return "adjective";
+  }
+  if (/(하게|히|으로|로|게|듯이)$/.test(k)) {
+    return "adverb";
+  }
+  return "noun";
+}
+
+function generateFallbackExamples(word, kor, apiPos) {
+  const w = (word || "").trim();
+  if (!w) return [];
+  const pos = apiPos || detectPosFromKorean(kor);
+  const wCap = w.charAt(0).toUpperCase() + w.slice(1);
+
+  if (pos === "verb") {
+    return [
+      "We need to " + w + " the main problem before making a final decision.",
+      "The team worked together to " + w + " the new system effectively.",
+      "Experts strongly recommend that we " + w + " this approach as soon as possible.",
+      "She tried her best to " + w + " the situation despite the tight deadline.",
+      "It is important to " + w + " the details carefully during the process.",
+      "Can you explain how to " + w + " this properly in practice?",
+      "Many researchers attempt to " + w + " similar results in their studies.",
+      "They decided to " + w + " the plan after reviewing the latest report."
+    ];
+  }
+  if (pos === "adjective") {
+    return [
+      "The professor gave a very " + w + " explanation during today's lecture.",
+      "This method turned out to be much more " + w + " than we expected.",
+      "Finding a " + w + " solution requires both patience and careful analysis.",
+      "The report highlighted several " + w + " factors behind the recent change.",
+      "Everyone agreed that the new design looks remarkably " + w + ".",
+      "In many cases, a " + w + " approach leads to better long-term outcomes.",
+      "Her " + w + " attitude helped the entire group stay focused.",
+      "It was a " + w + " moment that changed their perspective completely."
+    ];
+  }
+  if (pos === "adverb") {
+    return [
+      "The team handled the unexpected challenge " + w + " from start to finish.",
+      "The new policy was " + w + " accepted by most members of the community.",
+      "He responded " + w + " when asked about the future of the project.",
+      "The system operates " + w + " even under heavy workload conditions.",
+      "She " + w + " pointed out the key difference between the two theories.",
+      "Things began to change " + w + " after the updated guidelines were introduced.",
+      "They worked " + w + " to finish the assignment ahead of schedule.",
+      "The results were " + w + " consistent across all three experiments."
+    ];
+  }
+  // noun or phrase
+  return [
+    "Understanding the concept of " + w + " is essential in this field.",
+    "The recent article focused heavily on the role of " + w + " in modern society.",
+    "Researchers have been studying " + w + " for several decades.",
+    "A clear example of " + w + " can be seen in everyday life.",
+    "The professor asked us to analyze " + w + " in detail for the next class.",
+    "Proper knowledge of " + w + " helps solve complex problems more efficiently.",
+    wCap + " plays a crucial role in determining the overall outcome.",
+    "We discussed the impact of " + w + " during today's seminar."
+  ];
+}
+
+function pickDifferentExample(wordKey, candidates) {
+  const unique = [];
+  const seen = new Set();
+  (candidates || []).forEach(function(item) {
+    const s = (item || "").trim();
+    if (s && !seen.has(s.toLowerCase())) {
+      seen.add(s.toLowerCase());
+      unique.push(s);
+    }
+  });
+  if (unique.length === 0) return "";
+  if (unique.length === 1) {
+    lastShownExampleMap[wordKey] = unique[0];
+    return unique[0];
+  }
+  const last = lastShownExampleMap[wordKey] || "";
+  const others = unique.filter(function(s) { return s !== last; });
+  const pool = others.length > 0 ? others : unique;
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  lastShownExampleMap[wordKey] = picked;
+  return picked;
 }
 
 function getExampleTransMap() {
@@ -1242,7 +1357,7 @@ async function addWord() {
   eng = await checkAndFixSpelling(eng);
   decks[currentDeck][eng] = kor;
   if (ex) {
-    setExample(eng, ex);
+    setExample(eng, ex, true);
   }
   saveAllState();
   updateDeckSelectUI();
@@ -1474,94 +1589,185 @@ function hideOptionsUI() {
   }
 }
 
-function updateQuizExampleUI() {
+function renderQuizExample(word, exText, isManual) {
   const exBox = document.getElementById("quizExampleBox");
-  const exText = document.getElementById("quizExampleText");
+  const exTextEl = document.getElementById("quizExampleText");
   const exBtn = document.getElementById("quizExampleBtn");
-  if (!exBox || !exText || !exBtn) return;
+  const transEl = document.getElementById("quizExampleTrans");
+  if (!exBox || !exTextEl || !exBtn) return;
+
+  currentDisplayedExample = exText || "";
+  if (currentDisplayedExample) {
+    exTextEl.textContent = "📝 " + currentDisplayedExample;
+    exBox.style.display = "flex";
+    exBtn.textContent = isManual ? "📝 예문 수정 (E)" : "📝 예문 직접 수정 (E)";
+    if (optionsVisible) {
+      updateQuizExampleTranslationUI();
+    } else if (transEl) {
+      transEl.style.display = "none";
+      transEl.textContent = "";
+    }
+  } else {
+    exTextEl.textContent = "";
+    exBox.style.display = "none";
+    exBtn.textContent = "📝 예문 추가 (E)";
+    if (transEl) {
+      transEl.style.display = "none";
+      transEl.textContent = "";
+    }
+  }
+}
+
+function updateQuizExampleUI(forceDifferent) {
+  const exBox = document.getElementById("quizExampleBox");
+  const exTextEl = document.getElementById("quizExampleText");
+  const exBtn = document.getElementById("quizExampleBtn");
+  const transEl = document.getElementById("quizExampleTrans");
+  if (!exBox || !exTextEl || !exBtn) return;
+
+  // 진행 중인 이전 예문 요청 취소
+  if (currentExampleAbortController) {
+    try { currentExampleAbortController.abort(); } catch (e) {}
+    currentExampleAbortController = null;
+  }
+  const reqId = ++exampleRequestSeq;
 
   const word = currentQuestion;
-  const ex = getExample(word);
-  if (ex) {
-    exText.textContent = "📝 " + ex;
-    exBox.style.display = "flex";
-    exBtn.textContent = "📝 예문 수정 (E)";
-    updateQuizExampleTranslationUI();
+  if (!word) {
+    renderQuizExample("", "", false);
     return;
   }
-  const transEl = document.getElementById("quizExampleTrans");
+
+  const wordKey = word.trim().toLowerCase();
+  const kor = (decks[currentDeck] && decks[currentDeck][word]) ? decks[currentDeck][word] : "";
+  const savedEx = getExample(word);
+  const manual = isManualExample(word);
+
+  // 사용자가 직접 저장한 예문이 있고, 강제 변경(🔄 다른 예문)이 아닌 경우
+  if (manual && savedEx && !forceDifferent) {
+    renderQuizExample(word, savedEx, true);
+    return;
+  }
+
+  // 자동 예문 OFF인 경우: 저장된 예문이 있으면 그것만 표시, 없으면 숨김
+  if (!autoFetchExample) {
+    renderQuizExample(word, savedEx, manual);
+    return;
+  }
+
+  // 이미 사전 예문 풀이 캐시되어 있으면 즉시 매번 다른 예문 선택
+  if (autoExamplePoolCache[wordKey]) {
+    const cached = autoExamplePoolCache[wordKey];
+    let pool = cached.examples.slice();
+    if (savedEx) pool.push(savedEx);
+    if (pool.length < 2) {
+      pool = pool.concat(generateFallbackExamples(word, kor, cached.pos));
+    }
+    const picked = pickDifferentExample(wordKey, pool);
+    renderQuizExample(word, picked, false);
+    return;
+  }
+
+  // 로딩 표시 후 사전 API + 폴백 자동 생성
+  currentDisplayedExample = "";
   if (transEl) {
     transEl.style.display = "none";
     transEl.textContent = "";
   }
-
-  exBtn.textContent = "📝 예문 추가 (E)";
-  if (!autoFetchExample || !word || autoExampleNotFoundCache.has(word.toLowerCase())) {
-    exText.textContent = "";
-    exBox.style.display = "none";
-    return;
-  }
-
-  // 자동 예문 불러오기
-  exText.textContent = "⏳ 자동 예문 불러오는 중...";
+  exTextEl.textContent = "⏳ 자동 예문 생성 중...";
   exBox.style.display = "flex";
-  autoFetchExampleForWord(word);
+  exBtn.textContent = "📝 예문 직접 수정 (E)";
+
+  autoFetchExampleForWord(word, kor, savedEx, reqId);
 }
 
-async function autoFetchExampleForWord(word) {
+function refreshAutoExample() {
+  if (!currentQuestion) return;
+  updateQuizExampleUI(true);
+}
+
+async function fetchDictionaryExamplesWithTimeout(word, timeoutMs) {
   const wordKey = word.trim().toLowerCase();
+  const controller = new AbortController();
+  currentExampleAbortController = controller;
+  const timer = setTimeout(function() { controller.abort(); }, timeoutMs || 2500);
+  const foundExamples = [];
+  let detectedPos = "";
+
   try {
-    const res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(wordKey));
-    if (!res.ok) throw new Error("not found");
-    const data = await res.json();
-    let foundEx = "";
-    if (Array.isArray(data)) {
-      for (let i = 0; i < data.length && !foundEx; i++) {
-        const meanings = data[i].meanings || [];
-        for (let j = 0; j < meanings.length && !foundEx; j++) {
-          const defs = meanings[j].definitions || [];
-          for (let k = 0; k < defs.length && !foundEx; k++) {
-            if (defs[k].example) {
-              foundEx = defs[k].example;
+    const res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(wordKey), {
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        for (let i = 0; i < data.length; i++) {
+          const meanings = data[i].meanings || [];
+          for (let j = 0; j < meanings.length; j++) {
+            if (!detectedPos && meanings[j].partOfSpeech) {
+              detectedPos = meanings[j].partOfSpeech.toLowerCase();
+            }
+            const defs = meanings[j].definitions || [];
+            for (let k = 0; k < defs.length; k++) {
+              if (defs[k].example && typeof defs[k].example === "string") {
+                const cleaned = defs[k].example.trim();
+                if (cleaned && foundExamples.indexOf(cleaned) === -1) {
+                  foundExamples.push(cleaned);
+                }
+              }
             }
           }
         }
       }
+      return { ok: true, examples: foundExamples, pos: detectedPos };
     }
-    if (foundEx) {
-      setExample(word, foundEx);
-      saveAllState();
-      if (inQuizMode && currentQuestion === word) {
-        const exBox = document.getElementById("quizExampleBox");
-        const exText = document.getElementById("quizExampleText");
-        const exBtn = document.getElementById("quizExampleBtn");
-        if (exText) exText.textContent = "📝 " + foundEx;
-        if (exBox) exBox.style.display = "flex";
-        if (exBtn) exBtn.textContent = "📝 예문 수정 (E)";
-        updateQuizExampleTranslationUI();
-      }
-    } else {
-      autoExampleNotFoundCache.add(wordKey);
-      if (inQuizMode && currentQuestion === word) {
-        const exBox = document.getElementById("quizExampleBox");
-        const exText = document.getElementById("quizExampleText");
-        if (exText) exText.textContent = "";
-        if (exBox) exBox.style.display = "none";
-      }
-    }
+    return { ok: false, examples: [], pos: "" };
   } catch (e) {
-    autoExampleNotFoundCache.add(wordKey);
-    if (inQuizMode && currentQuestion === word) {
-      const exBox = document.getElementById("quizExampleBox");
-      const exText = document.getElementById("quizExampleText");
-      if (exText) exText.textContent = "";
-      if (exBox) exBox.style.display = "none";
+    clearTimeout(timer);
+    return { ok: false, aborted: e && e.name === "AbortError", examples: [], pos: "" };
+  } finally {
+    if (currentExampleAbortController === controller) {
+      currentExampleAbortController = null;
     }
   }
 }
 
+async function autoFetchExampleForWord(word, kor, savedEx, reqId) {
+  const wordKey = word.trim().toLowerCase();
+  const result = await fetchDictionaryExamplesWithTimeout(word, 2500);
+
+  // 요청 도중 다른 단어로 넘어갔으면 무시
+  if (reqId !== exampleRequestSeq || !inQuizMode || currentQuestion !== word) {
+    return;
+  }
+
+  let pool = [];
+  if (result.examples && result.examples.length > 0) {
+    pool = result.examples.slice();
+    autoExamplePoolCache[wordKey] = { examples: result.examples.slice(), pos: result.pos || "" };
+  } else if (result.ok) {
+    // 사전 응답은 왔으나 예문이 없는 단어 -> 폴백 풀을 캐시
+    const fb = generateFallbackExamples(word, kor, result.pos || "");
+    autoExamplePoolCache[wordKey] = { examples: fb, pos: result.pos || "" };
+    pool = fb.slice();
+  } else {
+    // 타임아웃/네트워크 중단 시에도 멈추지 않고 즉시 자동 예문 생성 (캐시 고정 안 함 -> 다음엔 API 재시도 가능)
+    pool = generateFallbackExamples(word, kor, "");
+  }
+
+  if (savedEx) pool.push(savedEx);
+  // 예문이 1개뿐이면 매번 다르게 나오도록 자동 생성 예문을 함께 보충
+  if (pool.length < 2) {
+    pool = pool.concat(generateFallbackExamples(word, kor, result.pos || ""));
+  }
+
+  const picked = pickDifferentExample(wordKey, pool);
+  renderQuizExample(word, picked, false);
+}
+
 function speakCurrentExample() {
-  const ex = getExample(currentQuestion);
+  const ex = currentDisplayedExample || getExample(currentQuestion);
   if (ex) speakText(ex);
 }
 
@@ -1572,7 +1778,7 @@ function openExampleModal(eng) {
   document.getElementById("exampleModalTitle").textContent = "📝 예문 추가 / 수정 : " + eng;
   document.getElementById("exampleModalSub").textContent = kor ? "뜻: " + kor : "단어에 대한 예문을 입력하거나 사전에서 불러오세요.";
   const ta = document.getElementById("exampleTextarea");
-  ta.value = getExample(eng);
+  ta.value = (inQuizMode && eng === currentQuestion && currentDisplayedExample) ? currentDisplayedExample : getExample(eng);
   document.getElementById("exampleModal").style.display = "flex";
   setTimeout(function() { ta.focus(); }, 50);
 }
@@ -1594,10 +1800,10 @@ function closeExampleModal() {
 function saveExampleFromModal() {
   if (!editingExampleWord) return;
   const exVal = document.getElementById("exampleTextarea").value.trim();
-  setExample(editingExampleWord, exVal);
+  setExample(editingExampleWord, exVal, true);
   saveAllState();
   if (inQuizMode) {
-    updateQuizExampleUI();
+    updateQuizExampleUI(false);
     const feedbackEl = document.getElementById("feedbackLabel");
     if (feedbackEl) {
       feedbackEl.textContent = exVal ? "📝 '" + editingExampleWord + "' 예문이 저장되었습니다!" : "🗑️ 예문이 삭제되었습니다.";
@@ -1616,10 +1822,10 @@ function deleteExampleFromModal() {
     closeExampleModal();
     return;
   }
-  if (confirm("'" + editingExampleWord + "'의 예문을 삭제하시겠습니까?")) {
-    setExample(editingExampleWord, "");
+  if (confirm("'" + editingExampleWord + "'의 저장된 예문을 삭제하시겠습니까?")) {
+    setExample(editingExampleWord, "", false);
     saveAllState();
-    if (inQuizMode) updateQuizExampleUI();
+    if (inQuizMode) updateQuizExampleUI(false);
     else refreshWordList();
     closeExampleModal();
   }
@@ -1631,34 +1837,30 @@ async function fetchDictionaryExample() {
   const ta = document.getElementById("exampleTextarea");
   const origText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "⏳ 사전 검색 중...";
+  btn.textContent = "⏳ 예문 생성 중...";
   try {
-    const wordQuery = editingExampleWord.trim().toLowerCase();
-    const res = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(wordQuery));
-    if (!res.ok) throw new Error("not found");
-    const data = await res.json();
-    let foundEx = "";
-    if (Array.isArray(data)) {
-      for (let i = 0; i < data.length && !foundEx; i++) {
-        const meanings = data[i].meanings || [];
-        for (let j = 0; j < meanings.length && !foundEx; j++) {
-          const defs = meanings[j].definitions || [];
-          for (let k = 0; k < defs.length && !foundEx; k++) {
-            if (defs[k].example) {
-              foundEx = defs[k].example;
-            }
-          }
-        }
+    const word = editingExampleWord;
+    const wordKey = word.trim().toLowerCase();
+    const kor = (decks[currentDeck] && decks[currentDeck][word]) ? decks[currentDeck][word] : "";
+    let pool = [];
+
+    if (autoExamplePoolCache[wordKey]) {
+      pool = autoExamplePoolCache[wordKey].examples.slice();
+    } else {
+      const result = await fetchDictionaryExamplesWithTimeout(word, 2500);
+      if (result.examples && result.examples.length > 0) {
+        pool = result.examples.slice();
+        autoExamplePoolCache[wordKey] = { examples: result.examples.slice(), pos: result.pos || "" };
       }
     }
-    if (foundEx) {
-      ta.value = foundEx;
-      speakText(foundEx);
-    } else {
-      alert("무료 영영사전에서 '" + editingExampleWord + "'의 예문을 찾지 못했습니다. 직접 입력해주세요.");
+    if (pool.length < 2) {
+      pool = pool.concat(generateFallbackExamples(word, kor, ""));
     }
-  } catch (e) {
-    alert("사전 예문을 불러오지 못했습니다. (오프라인이거나 사전에 등록되지 않은 단어/숙어) 직접 입력해주세요.");
+    const picked = pickDifferentExample(wordKey, pool);
+    if (picked) {
+      ta.value = picked;
+      speakText(picked);
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = origText;
@@ -1690,7 +1892,7 @@ async function updateQuizExampleTranslationUI() {
   if (!transEl) return;
 
   const word = currentQuestion;
-  const ex = getExample(word);
+  const ex = currentDisplayedExample || getExample(word);
   if (!optionsVisible || !ex) {
     transEl.style.display = "none";
     transEl.textContent = "";
@@ -1711,12 +1913,12 @@ async function updateQuizExampleTranslationUI() {
   if (translated) {
     setExampleTranslation(ex, translated);
     saveAllState();
-    if (inQuizMode && optionsVisible && currentQuestion === word && getExample(word) === ex) {
+    if (inQuizMode && optionsVisible && currentQuestion === word && currentDisplayedExample === ex) {
       transEl.textContent = "💬 " + translated;
       transEl.style.display = "block";
     }
   } else {
-    if (inQuizMode && currentQuestion === word) {
+    if (inQuizMode && currentQuestion === word && currentDisplayedExample === ex) {
       transEl.style.display = "none";
       transEl.textContent = "";
     }
