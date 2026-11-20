@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.5 Web (오답 자동 세이브 & 자동 예문)</title>
+<title>나만의 영단어 암기 게임 v7.6 Web (보기 가리기 & 자동 넘김 설정)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -472,6 +472,14 @@
         <input type="checkbox" id="autoExampleChk" checked onchange="onAutoExampleToggle()" style="width:17px; height:17px; cursor:pointer;">
         자동 예문
       </label>
+      <label style="display:flex; align-items:center; gap:5px; font-size:14px; font-weight:bold; color:#0d47a1; cursor:pointer; user-select:none;">
+        <input type="checkbox" id="hideOptionsChk" checked onchange="onHideOptionsToggle()" style="width:17px; height:17px; cursor:pointer;">
+        보기 가리기
+      </label>
+      <label style="display:flex; align-items:center; gap:5px; font-size:14px; font-weight:bold; color:#1b5e20; cursor:pointer; user-select:none;">
+        <input type="checkbox" id="autoNextChk" onchange="onAutoNextToggle()" style="width:17px; height:17px; cursor:pointer;">
+        정답 시 자동 넘김
+      </label>
       <button type="button" class="btn-yellow" onclick="openTargetModal()">📌 오답노트 지정 변경</button>
     </div>
   </div>
@@ -655,6 +663,9 @@ let pendingTargetChoice = "";
 let syncTimeout = null;
 let autoSaveWrong = true;
 let autoFetchExample = true;
+let hideOptionsMode = true;
+let autoNextOnCorrect = false;
+let currentAnsweredCorrectly = false;
 let editingExampleWord = null;
 const autoExampleNotFoundCache = new Set();
 
@@ -726,6 +737,18 @@ function initApp() {
     autoFetchExample = true;
   }
 
+  if (typeof progress["_hide_options"] === "boolean") {
+    hideOptionsMode = progress["_hide_options"];
+  } else {
+    hideOptionsMode = true;
+  }
+
+  if (typeof progress["_auto_next_on_correct"] === "boolean") {
+    autoNextOnCorrect = progress["_auto_next_on_correct"];
+  } else {
+    autoNextOnCorrect = false;
+  }
+
   updateDeckSelectUI();
   updateTargetUI();
   updateSyncBanner();
@@ -750,6 +773,8 @@ function saveAllState() {
   progress["_target_deck"] = targetDeck;
   progress["_auto_save_wrong"] = autoSaveWrong;
   progress["_auto_fetch_example"] = autoFetchExample;
+  progress["_hide_options"] = hideOptionsMode;
+  progress["_auto_next_on_correct"] = autoNextOnCorrect;
   safeSetStorage("vocab_v72_decks", JSON.stringify(decks));
   safeSetStorage("vocab_v72_progress", JSON.stringify(progress));
   scheduleCloudPush();
@@ -842,6 +867,10 @@ function updateTargetUI() {
   if (autoChk) autoChk.checked = autoSaveWrong;
   const exChk = document.getElementById("autoExampleChk");
   if (exChk) exChk.checked = autoFetchExample;
+  const hideChk = document.getElementById("hideOptionsChk");
+  if (hideChk) hideChk.checked = hideOptionsMode;
+  const nextChk = document.getElementById("autoNextChk");
+  if (nextChk) nextChk.checked = autoNextOnCorrect;
 }
 
 function onAutoSaveToggle() {
@@ -857,6 +886,25 @@ function onAutoExampleToggle() {
   if (inQuizMode && currentQuestion) {
     updateQuizExampleUI();
   }
+}
+
+function onHideOptionsToggle() {
+  const hideChk = document.getElementById("hideOptionsChk");
+  hideOptionsMode = hideChk ? hideChk.checked : true;
+  saveAllState();
+  if (inQuizMode && currentQuestion) {
+    if (!hideOptionsMode && !optionsVisible) {
+      revealOptions();
+    } else if (hideOptionsMode && optionsVisible && !currentAnsweredCorrectly) {
+      hideOptionsUI();
+    }
+  }
+}
+
+function onAutoNextToggle() {
+  const nextChk = document.getElementById("autoNextChk");
+  autoNextOnCorrect = nextChk ? nextChk.checked : false;
+  saveAllState();
 }
 
 function onDeckChange() {
@@ -1194,6 +1242,7 @@ function loadQuestionAtCurrentIndex() {
   const feedbackEl = document.getElementById("feedbackLabel");
   feedbackEl.textContent = "";
   optionsVisible = false;
+  currentAnsweredCorrectly = false;
 
   const words = decks[currentDeck] || {};
   const engWords = Object.keys(words);
@@ -1234,7 +1283,23 @@ function loadQuestionAtCurrentIndex() {
 
   currentOptions = wrongAnswers.concat([correctAnswer]).sort(function() { return Math.random() - 0.5; });
 
+  if (hideOptionsMode) {
+    hideOptionsUI();
+  } else {
+    for (let i = 0; i < 4; i++) {
+      document.getElementById("optBtn" + i).style.background = "#ffffff";
+    }
+    revealOptions();
+  }
+
+  updateQuizExampleUI();
+  speakText(currentQuestion);
+}
+
+function hideOptionsUI() {
+  optionsVisible = false;
   const revealBtn = document.getElementById("revealBtn");
+  revealBtn.style.display = "block";
   revealBtn.textContent = "[ 객관식 보기 표시 (클릭 / 터치 / Space) ]";
   revealBtn.disabled = false;
   revealBtn.style.background = "#bbdefb";
@@ -1245,9 +1310,6 @@ function loadQuestionAtCurrentIndex() {
     btn.disabled = true;
     btn.style.background = "#ffffff";
   }
-
-  updateQuizExampleUI();
-  speakText(currentQuestion);
 }
 
 function updateQuizExampleUI() {
@@ -1437,9 +1499,14 @@ async function fetchDictionaryExample() {
 function revealOptions() {
   optionsVisible = true;
   const revealBtn = document.getElementById("revealBtn");
-  revealBtn.textContent = "보기가 표시되었습니다 (클릭 / 터치 또는 1~4번 키 선택)";
-  revealBtn.disabled = true;
-  revealBtn.style.background = "#e0e0e0";
+  if (!hideOptionsMode) {
+    revealBtn.style.display = "none";
+  } else {
+    revealBtn.style.display = "block";
+    revealBtn.textContent = "보기가 표시되었습니다 (클릭 / 터치 또는 1~4번 키 선택)";
+    revealBtn.disabled = true;
+    revealBtn.style.background = "#e0e0e0";
+  }
 
   for (let i = 0; i < 4; i++) {
     const btn = document.getElementById("optBtn" + i);
@@ -1455,15 +1522,21 @@ function checkAnswer(idx) {
   const feedbackEl = document.getElementById("feedbackLabel");
 
   if (selected === correct) {
-    feedbackEl.textContent = "⭕ 정답입니다!";
-    feedbackEl.style.color = "#2e7d32";
+    currentAnsweredCorrectly = true;
     document.getElementById("optBtn" + idx).style.background = "#c8e6c9";
     for (let i = 0; i < 4; i++) {
       document.getElementById("optBtn" + i).disabled = true;
     }
-    setTimeout(function() {
-      advanceAndNext();
-    }, 900);
+    if (autoNextOnCorrect) {
+      feedbackEl.textContent = "⭕ 정답입니다!";
+      feedbackEl.style.color = "#2e7d32";
+      setTimeout(function() {
+        advanceAndNext();
+      }, 220);
+    } else {
+      feedbackEl.textContent = "⭕ 정답입니다! [▶ / Space / Enter]로 다음 단어로 이동하세요.";
+      feedbackEl.style.color = "#2e7d32";
+    }
   } else {
     document.getElementById("optBtn" + idx).style.background = "#ffcdd2";
     if (autoSaveWrong && decks[targetDeck]) {
@@ -1596,7 +1669,16 @@ window.addEventListener("keydown", function(e) {
   if (inQuizMode) {
     if (e.code === "Space") {
       e.preventDefault();
-      if (!optionsVisible) revealOptions();
+      if (currentAnsweredCorrectly && !autoNextOnCorrect) {
+        advanceAndNext();
+      } else if (!optionsVisible) {
+        revealOptions();
+      }
+    } else if (e.code === "Enter") {
+      if (currentAnsweredCorrectly && !autoNextOnCorrect) {
+        e.preventDefault();
+        advanceAndNext();
+      }
     } else if (e.code === "ArrowLeft") {
       e.preventDefault();
       prevQuestion();
@@ -1674,6 +1756,12 @@ function importJsonFiles(event) {
           }
           if (typeof progress["_auto_fetch_example"] === "boolean") {
             autoFetchExample = progress["_auto_fetch_example"];
+          }
+          if (typeof progress["_hide_options"] === "boolean") {
+            hideOptionsMode = progress["_hide_options"];
+          }
+          if (typeof progress["_auto_next_on_correct"] === "boolean") {
+            autoNextOnCorrect = progress["_auto_next_on_correct"];
           }
 
           saveAllState();
@@ -1848,6 +1936,12 @@ async function cloudPull(showAlert) {
         }
         if (typeof progress["_auto_fetch_example"] === "boolean") {
           autoFetchExample = progress["_auto_fetch_example"];
+        }
+        if (typeof progress["_hide_options"] === "boolean") {
+          hideOptionsMode = progress["_hide_options"];
+        }
+        if (typeof progress["_auto_next_on_correct"] === "boolean") {
+          autoNextOnCorrect = progress["_auto_next_on_correct"];
         }
         updateDeckSelectUI();
         updateTargetUI();
