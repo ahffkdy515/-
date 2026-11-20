@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.13 Web (영단어 번역기 & 정답 시 예문 읽기)</title>
+<title>나만의 영단어 암기 게임 v7.14 Web (Z키 예문 읽기 추가)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -596,7 +596,7 @@
   <!-- 화면 2: 퀴즈 화면 -->
   <div id="quizScreen" style="display:flex; flex-direction:column; gap:8px; flex:1;">
     <div class="shortcut-banner">
-      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답 보기·예문 읽기 / 다음 | [◀/▶] 이전·다음 | [S] 오답노트 | [E] 예문 | [T] 번역기
+      🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답·예문 읽기 / 다음 | [Z] 예문 듣기 | [◀/▶] 이전·다음 | [S] 오답노트 | [E] 예문 | [T] 번역기
     </div>
 
     <div class="quiz-nav">
@@ -624,7 +624,7 @@
       </div>
       <div class="example-btns">
         <button type="button" class="btn-blue" style="padding:5px 10px; font-size:13px;" onclick="refreshAutoExample()">🔄 다른 예문</button>
-        <button type="button" class="btn-green" style="padding:5px 10px; font-size:13px;" onclick="speakCurrentExample()">🔊 예문 듣기</button>
+        <button type="button" class="btn-green" style="padding:5px 10px; font-size:13px;" onclick="speakCurrentExample()">🔊 예문 듣기 (Z)</button>
         <button type="button" class="btn-purple" style="padding:5px 10px; font-size:13px;" onclick="openExampleModal(currentQuestion)">✏️ 수정</button>
       </div>
     </div>
@@ -2400,6 +2400,9 @@ window.addEventListener("keydown", function(e) {
     } else if (e.key === "e" || e.key === "E" || e.key === "ㄷ" || e.code === "KeyE") {
       e.preventDefault();
       openExampleModal(currentQuestion);
+    } else if (e.key === "z" || e.key === "Z" || e.key === "ㅋ" || e.code === "KeyZ") {
+      e.preventDefault();
+      speakCurrentExample();
     } else if (e.key === "1") {
       e.preventDefault();
       if (!optionsVisible) {
