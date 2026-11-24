@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.28 Web (AI 무한 생성 + 8개 백업 저장소 & 상단 정리)</title>
+<title>나만의 영단어 암기 게임 v7.30 Web (단어 이동 바 개선)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -657,12 +657,11 @@
       🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답·예문 읽기 | [A/D] 이전·다음 예문 | [Z] 예문 듣기 | [◀/▶] 이전·다음 단어 | [S] 오답노트
     </div>
 
-    <div class="quiz-nav">
-      <button type="button" onclick="prevQuestion()">◀ 이전 단어 (Left)</button>
-      <div class="quiz-info" id="quizInfoLabel">[단어장] 1 / 1번째 단어</div>
+    <div class="group-box quiz-nav" style="margin-bottom:2px;">
+      <div class="quiz-info" id="quizInfoLabel" style="text-align:left;">[단어장] 1 / 1번째 단어</div>
       <div style="display:flex; gap:6px;">
+        <button type="button" onclick="prevQuestion()">◀ 이전 단어 (Left)</button>
         <button type="button" onclick="advanceAndNext()">다음 단어 (Right) ▶</button>
-        <button type="button" onclick="resetDeckProgress()">처음(1번)부터</button>
       </div>
     </div>
 
@@ -687,12 +686,8 @@
       </div>
     </div>
 
-    <button type="button" class="reveal-btn" id="revealBtn" onclick="revealOptions()">
-      [ 정답 보기 (클릭 / 터치 / Space) ]
-    </button>
-
     <div class="options-list">
-      <button type="button" class="option-btn" id="optBtn0" onclick="checkAnswer(0)" disabled style="text-align:center; font-size:22px; font-weight:bold; padding:18px 16px;">[ ? ] 정답 가려짐</button>
+      <button type="button" class="option-btn" id="optBtn0" onclick="onOptBtn0Click()" style="text-align:center; font-size:22px; font-weight:bold; padding:18px 16px;">[ ? ] 정답 보기</button>
     </div>
 
     <div class="feedback-area" id="feedbackLabel"></div>
@@ -2636,21 +2631,24 @@ function loadQuestionAtCurrentIndex() {
 
 function hideOptionsUI() {
   optionsVisible = false;
-  const revealBtn = document.getElementById("revealBtn");
-  revealBtn.style.display = "block";
-  revealBtn.textContent = "[ 정답 보기 (클릭 / 터치 / Space) ]";
-  revealBtn.disabled = false;
-  revealBtn.style.background = "#bbdefb";
 
   const btn = document.getElementById("optBtn0");
-  btn.textContent = "[ ? ] 정답 가려짐";
-  btn.disabled = true;
+  btn.textContent = "[ ? ] 정답 보기";
+  btn.disabled = false;
   btn.style.background = "#ffffff";
 
   const transEl = document.getElementById("quizExampleTrans");
   if (transEl) {
     transEl.style.display = "none";
     transEl.textContent = "";
+  }
+}
+
+function onOptBtn0Click() {
+  if (!optionsVisible) {
+    revealOptions();
+  } else {
+    checkAnswer(0);
   }
 }
 
@@ -2973,15 +2971,6 @@ async function fetchDictionaryExample() {
 
 function revealOptions(fromInit) {
   optionsVisible = true;
-  const revealBtn = document.getElementById("revealBtn");
-  if (!hideOptionsMode) {
-    revealBtn.style.display = "none";
-  } else {
-    revealBtn.style.display = "block";
-    revealBtn.textContent = "정답이 표시되었습니다 (Space: 예문 다시 읽기 | Enter / ▶: 다음 단어)";
-    revealBtn.disabled = true;
-    revealBtn.style.background = "#e0e0e0";
-  }
 
   const btn = document.getElementById("optBtn0");
   btn.textContent = currentOptions[0];
