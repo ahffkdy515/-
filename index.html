@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.30 Web (단어 이동 바 개선)</title>
+<title>나만의 영단어 암기 게임 v7.31 Web (독립된 이전·다음 버튼 박스 & 모바일 최적화)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -657,12 +657,12 @@
       🖱️ 터치/클릭 또는 ⌨️ 단축키 | [Space] 정답·예문 읽기 | [A/D] 이전·다음 예문 | [Z] 예문 듣기 | [◀/▶] 이전·다음 단어 | [S] 오답노트
     </div>
 
-    <div class="group-box quiz-nav" style="margin-bottom:2px;">
-      <div class="quiz-info" id="quizInfoLabel" style="text-align:left;">[단어장] 1 / 1번째 단어</div>
-      <div style="display:flex; gap:6px;">
-        <button type="button" onclick="prevQuestion()">◀ 이전 단어 (Left)</button>
-        <button type="button" onclick="advanceAndNext()">다음 단어 (Right) ▶</button>
-      </div>
+    <div class="group-box" style="padding:8px 14px; margin-bottom:0;">
+      <div class="quiz-info" id="quizInfoLabel" style="text-align:left; font-size:18px;">[단어장] 1 / 1번째 단어</div>
+    </div>
+    <div class="group-box" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px 12px; margin-bottom:2px;">
+      <button type="button" style="padding:11px 10px; font-size:16px;" onclick="prevQuestion()">◀ 이전 단어</button>
+      <button type="button" style="padding:11px 10px; font-size:16px;" onclick="advanceAndNext()">다음 단어 ▶</button>
     </div>
 
     <div class="question-box">
