@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.39 Web (오른쪽 Ctrl/한자키 정답 공개 지원)</title>
+<title>나만의 영단어 암기 게임 v7.40 Web (예문 박스를 정답 보기 아래로 이동)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -682,7 +682,11 @@
       <div class="question-word" id="questionLabel" title="우클릭 시 오답노트에 즉시 세이브" oncontextmenu="event.preventDefault(); sendToDeck();">loading...</div>
     </div>
 
-    <div class="example-box" id="quizExampleBox" style="display:none;">
+    <div class="options-list">
+      <button type="button" class="option-btn" id="optBtn0" onclick="onOptBtn0Click()" style="text-align:center; font-size:22px; font-weight:bold; padding:18px 16px;">[ ? ] 정답 보기</button>
+    </div>
+
+    <div class="example-box" id="quizExampleBox" style="display:none; margin-top:4px; margin-bottom:0;">
       <div class="example-text-wrap">
         <div class="example-text" id="quizExampleText" title="원하는 단어를 클릭하면 그 위치부터 재생됩니다"></div>
         <div class="example-translation" id="quizExampleTrans" style="display:none;"></div>
@@ -694,10 +698,6 @@
         <button type="button" class="btn-green" style="padding:5px 10px; font-size:13px;" onclick="speakCurrentExample()">🔊 예문 듣기 (Z)</button>
         <button type="button" class="btn-purple" style="padding:5px 10px; font-size:13px;" onclick="openExampleModal(currentQuestion)">✏️ 수정</button>
       </div>
-    </div>
-
-    <div class="options-list">
-      <button type="button" class="option-btn" id="optBtn0" onclick="onOptBtn0Click()" style="text-align:center; font-size:22px; font-weight:bold; padding:18px 16px;">[ ? ] 정답 보기</button>
     </div>
 
     <div class="feedback-area" id="feedbackLabel"></div>
