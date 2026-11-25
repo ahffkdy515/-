@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.37 Web (5단어씩 라운드 일괄 예문 생성)</title>
+<title>나만의 영단어 암기 게임 v7.38 Web (현재 예문 번호 1/4 표시)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -230,9 +230,21 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
+    align-items: center;
     gap: 6px;
     padding-top: 8px;
     border-top: 1px dashed #ce93d8;
+  }
+  .example-index-badge {
+    margin-right: auto;
+    font-size: 13px;
+    font-weight: bold;
+    color: #4527a0;
+    background: #ede7f6;
+    border: 1px solid #b39ddb;
+    border-radius: 12px;
+    padding: 4px 10px;
+    white-space: nowrap;
   }
   .word-item-content {
     display: flex;
@@ -676,6 +688,7 @@
         <div class="example-translation" id="quizExampleTrans" style="display:none;"></div>
       </div>
       <div class="example-btns">
+        <span id="exampleIndexBadge" class="example-index-badge" style="display:none;"></span>
         <button type="button" id="btnPrevExample" style="padding:5px 10px; font-size:13px;" onclick="prevAutoExample()" disabled>◀ 이전 예문 (A)</button>
         <button type="button" class="btn-blue" id="btnRefreshExample" style="padding:5px 10px; font-size:13px;" onclick="refreshAutoExample()">🔄 다음 예문 (D)</button>
         <button type="button" class="btn-green" style="padding:5px 10px; font-size:13px;" onclick="speakCurrentExample()">🔊 예문 듣기 (Z)</button>
@@ -1091,16 +1104,57 @@ function addSavedAiExample(word, exText, koText) {
   return false;
 }
 
-function updateRefreshExampleBtnLabel(word) {
+function getExamplePositionLabel(word, displayedEx, isManual, isLoading) {
+  if (!word) return "";
+  if (isLoading) return "⏳ 생성 중...";
+  const ex = (displayedEx || "").trim();
+  if (!ex) return "";
+  if (isManual) return "📝 직접 입력 예문";
+
+  const savedAiList = getSavedAiExamples(word);
+  const savedCount = savedAiList.length;
+  const savedIdx = savedAiList.findIndex(function(item) {
+    return item && item.ex && item.ex.trim() === ex;
+  });
+
+  if (savedIdx !== -1) {
+    return "예문 (" + (savedIdx + 1) + "/" + savedCount + ")";
+  }
+
+  // 저장된 4개 이후 무한 생성된 예문인 경우
+  const wordKey = word.trim().toLowerCase();
+  const hist = wordExampleHistoryMap[wordKey] || [];
+  const savedSet = new Set(savedAiList.map(function(item) { return item && item.ex ? item.ex.trim() : ""; }));
+  const extraSeen = [];
+  hist.forEach(function(h) {
+    const t = (h || "").trim();
+    if (t && !savedSet.has(t) && extraSeen.indexOf(t) === -1) {
+      extraSeen.push(t);
+    }
+  });
+  const extraIdx = extraSeen.indexOf(ex);
+  const num = savedCount + (extraIdx !== -1 ? extraIdx + 1 : 1);
+  return "예문 (" + num + "/" + MAX_SAVED_AI_EXAMPLES + "+ 무한)";
+}
+
+function updateRefreshExampleBtnLabel(word, isManual, isLoading) {
   const btn = document.getElementById("btnRefreshExample");
   const prevBtn = document.getElementById("btnPrevExample");
+  const badge = document.getElementById("exampleIndexBadge");
   const savedCount = Math.min(getSavedAiExamples(word).length, MAX_SAVED_AI_EXAMPLES);
-  if (btn) {
-    if (savedCount > 0) {
-      btn.textContent = "🔄 다음 예문 (" + savedCount + "/" + MAX_SAVED_AI_EXAMPLES + ") (D)";
+
+  if (badge) {
+    const label = getExamplePositionLabel(word, currentDisplayedExample, isManual, isLoading);
+    if (label) {
+      badge.textContent = label;
+      badge.style.display = "inline-block";
     } else {
-      btn.textContent = "🔄 다음 예문 (D)";
+      badge.textContent = "";
+      badge.style.display = "none";
     }
+  }
+  if (btn) {
+    btn.textContent = "🔄 다음 예문 (D)";
   }
   if (prevBtn) {
     const wordKey = word ? word.trim().toLowerCase() : "";
@@ -2777,8 +2831,8 @@ function renderQuizExample(word, exText, isManual, fromHistoryNav) {
     lastShownExampleMap[wordKey] = trimmed;
   }
 
-  updateRefreshExampleBtnLabel(word);
   currentDisplayedExample = trimmed;
+  updateRefreshExampleBtnLabel(word, isManual, false);
   if (currentDisplayedExample) {
     renderClickableExampleText(exTextEl, currentDisplayedExample);
     exBox.style.display = "flex";
@@ -2867,7 +2921,7 @@ function updateQuizExampleUI(forceDifferent) {
       transEl.style.display = "none";
       transEl.textContent = "";
     }
-    updateRefreshExampleBtnLabel(word);
+    updateRefreshExampleBtnLabel(word, false, true);
     exTextEl.textContent = savedAiList.length < MAX_SAVED_AI_EXAMPLES
       ? "✨ AI가 새로운 예문 생성 중... (" + (savedAiList.length + 1) + "/" + MAX_SAVED_AI_EXAMPLES + ")"
       : "✨ AI가 새로운 예문 생성 중...";
@@ -3159,7 +3213,21 @@ async function toggleBatchPrefetchExamples() {
 }
 
 function refreshAutoExample() {
-  if (!currentQuestion) return;
+  const word = currentQuestion;
+  if (!word) return;
+  const wordKey = word.trim().toLowerCase();
+  const hist = wordExampleHistoryMap[wordKey] || [];
+  let cur = typeof wordExampleCursorMap[wordKey] === "number" ? wordExampleCursorMap[wordKey] : -1;
+
+  // 이전 예문(A)으로 뒤로 갔던 상태라면, 새 예문을 생성하기 전에 다음 기록으로 먼저 이동
+  if (cur >= 0 && cur < hist.length - 1 && hist[cur + 1]) {
+    cur += 1;
+    wordExampleCursorMap[wordKey] = cur;
+    lastShownExampleMap[wordKey] = hist[cur];
+    renderQuizExample(word, hist[cur], false, true);
+    return;
+  }
+
   updateQuizExampleUI(true);
 }
 
