@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>나만의 영단어 암기 게임 v7.38 Web (현재 예문 번호 1/4 표시)</title>
+<title>나만의 영단어 암기 게임 v7.39 Web (오른쪽 Ctrl/한자키 정답 공개 지원)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -3568,19 +3568,31 @@ function deleteCurrentQuizWord() {
 }
 
 // --- 9. 키보드 단축키 완벽 지원 (PC용) ---
+function isRightCtrlHanjaKey(e) {
+  return e.key === "HanjaMode" || e.code === "Lang2" || e.keyCode === 25;
+}
+
+function isStandardCtrlKey(e) {
+  return e.key === "Control" || e.code === "ControlLeft" || e.code === "ControlRight";
+}
+
+function canTriggerQuizShortcut() {
+  const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
+  if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") return false;
+  if (document.getElementById("aiModal").style.display === "flex" ||
+      document.getElementById("translatorModal").style.display === "flex" ||
+      document.getElementById("exampleModal").style.display === "flex" ||
+      document.getElementById("targetModal").style.display === "flex" ||
+      document.getElementById("cloudModal").style.display === "flex") return false;
+  return true;
+}
+
 let ctrlPressedAlone = false;
 window.addEventListener("keyup", function(e) {
-  if (e.key === "Control") {
+  if (isStandardCtrlKey(e)) {
     const wasAlone = ctrlPressedAlone;
     ctrlPressedAlone = false;
-    if (!wasAlone) return;
-    const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
-    if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") return;
-    if (document.getElementById("aiModal").style.display === "flex" ||
-        document.getElementById("translatorModal").style.display === "flex" ||
-        document.getElementById("exampleModal").style.display === "flex" ||
-        document.getElementById("targetModal").style.display === "flex" ||
-        document.getElementById("cloudModal").style.display === "flex") return;
+    if (!wasAlone || !canTriggerQuizShortcut()) return;
     if (inQuizMode && !optionsVisible) {
       e.preventDefault();
       revealOptions();
@@ -3589,7 +3601,15 @@ window.addEventListener("keyup", function(e) {
 });
 
 window.addEventListener("keydown", function(e) {
-  if (e.key === "Control") {
+  if (isRightCtrlHanjaKey(e)) {
+    ctrlPressedAlone = false;
+    if (canTriggerQuizShortcut() && inQuizMode && !optionsVisible) {
+      e.preventDefault();
+      revealOptions();
+    }
+    return;
+  }
+  if (isStandardCtrlKey(e)) {
     if (!e.repeat) ctrlPressedAlone = true;
     return;
   } else {
