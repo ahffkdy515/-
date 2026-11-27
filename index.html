@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>단어 암기 웹 v7.36 Web (발음·세이브 가로 배치 & Ctrl 정답 공개)</title>
+<title>단어 암기 웹 v7.37 Web (성능·동기화·AI 배치 최적화)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -633,7 +633,7 @@
       <div class="search-bar">
         <div style="display:flex; align-items:center; gap:6px; flex:1;">
           <span style="font-weight:bold;">단어 검색:</span>
-          <input type="text" id="searchInput" class="text-input" placeholder="영어 또는 뜻 검색..." oninput="refreshWordList()">
+          <input type="text" id="searchInput" class="text-input" placeholder="영어 또는 뜻 검색..." oninput="debouncedRefreshWordList()">
         </div>
         <div id="countLabel" style="font-weight:bold; color:#1565c0;">총 0개</div>
       </div>
@@ -938,7 +938,6 @@ function initApp() {
   updateDeckSelectUI();
   updateTargetUI();
   updateSyncBanner();
-  updateAiButtonUI();
 
   // 클라우드 설정이 있으면 시작 시 최신 데이터 자동 확인
   const token = safeGetStorage("vocab_gist_token");
@@ -955,14 +954,16 @@ function initApp() {
   }
 }
 
-function saveAllState() {
+function saveAllState(decksChanged) {
   progress["_last_deck"] = currentDeck;
   progress["_target_deck"] = targetDeck;
   progress["_auto_save_wrong"] = autoSaveWrong;
   progress["_auto_fetch_example"] = autoFetchExample;
   progress["_hide_options"] = hideOptionsMode;
   progress["_auto_next_on_correct"] = autoNextOnCorrect;
-  safeSetStorage("vocab_v72_decks", JSON.stringify(decks));
+  if (decksChanged !== false) {
+    safeSetStorage("vocab_v72_decks", JSON.stringify(decks));
+  }
   safeSetStorage("vocab_v72_progress", JSON.stringify(progress));
   scheduleCloudPush();
 }
@@ -1416,18 +1417,6 @@ function ensureModelOptionInSelect(modelId) {
   modelSel.value = modelId;
 }
 
-function updateAiButtonUI() {
-  const btn = document.getElementById("btnAiConfig");
-  if (!btn) return;
-  if (getGeminiApiKey()) {
-    btn.textContent = "✨ AI 예문 ON";
-    btn.className = "btn-green";
-  } else {
-    btn.textContent = "✨ AI 예문 설정";
-    btn.className = "btn-yellow";
-  }
-}
-
 function openAiModal() {
   const keyInp = document.getElementById("geminiApiKeyInput");
   const statusEl = document.getElementById("aiModalStatus");
@@ -1452,7 +1441,6 @@ function closeAiModal() {
 function disconnectAiConfig() {
   safeRemoveStorage("vocab_gemini_api_key");
   safeRemoveStorage("vocab_gemini_model");
-  updateAiButtonUI();
   closeAiModal();
   alert("Gemini AI 연결이 해제되었습니다. (이미 저장된 AI 예문만 표시됩니다)");
 }
@@ -1678,8 +1666,7 @@ async function saveAiConfig() {
     safeSetStorage("vocab_gemini_api_key", apiKey);
     safeSetStorage("vocab_gemini_model", out.usedModel);
     ensureModelOptionInSelect(out.usedModel);
-    updateAiButtonUI();
-    statusEl.textContent = "✔️ 연결 성공! (연결된 모델: " + out.usedModel + ") 테스트 예문: " + out.res.example;
+      statusEl.textContent = "✔️ 연결 성공! (연결된 모델: " + out.usedModel + ") 테스트 예문: " + out.res.example;
     statusEl.style.color = "#2e7d32";
     setTimeout(function() {
       closeAiModal();
@@ -1708,72 +1695,38 @@ function isWordInTargetDeck(eng) {
 
 function updateQuizSaveBtnUI() {
   const saveBtn = document.getElementById("quizSaveBtn");
-  const bottomBtn = document.getElementById("quizBottomSaveBtn");
+  if (!saveBtn) return;
   const alreadySaved = isWordInTargetDeck(currentQuestion);
-
-  if (saveBtn) {
-    if (alreadySaved) {
-      saveBtn.textContent = "✔️ [" + targetDeck + "]에 이미 세이브됨";
-      saveBtn.style.background = "#a5d6a7";
-    } else {
-      saveBtn.textContent = "💾 [" + targetDeck + "]에 세이브 (클릭 / S)";
-      saveBtn.style.background = "#ffb74d";
-    }
-  }
-  if (bottomBtn) {
-    if (alreadySaved) {
-      bottomBtn.textContent = "✔️ 이미 세이브됨";
-      bottomBtn.style.background = "#a5d6a7";
-    } else {
-      bottomBtn.textContent = "💾 오답노트에 세이브 (클릭 / S)";
-      bottomBtn.style.background = "#ffb74d";
-    }
+  if (alreadySaved) {
+    saveBtn.textContent = "✔️ [" + targetDeck + "]에 이미 세이브됨";
+    saveBtn.style.background = "#a5d6a7";
+  } else {
+    saveBtn.textContent = "💾 [" + targetDeck + "]에 세이브 (클릭 / S)";
+    saveBtn.style.background = "#ffb74d";
   }
 }
 
-// --- 3. 원어민 발음 재생 (브라우저 내장 TTS + 구글 TTS 폴백, 노래방 스타일 예문 하이라이트 지원) ---
+// --- 3. 원어민 발음 재생 (브라우저 내장 TTS + 구글 TTS 폴백, 클릭 위치부터 재생 지원) ---
 let currentAudio = null;
-let karaokeFallbackTimer = null;
-let karaokeSessionId = 0;
-let currentExampleWordSpans = [];
 let currentExampleWordStarts = [];
 
-function clearExampleKaraoke() {
-  karaokeSessionId++;
-  cancelHoverWordTranslate();
-  if (karaokeFallbackTimer) {
-    clearInterval(karaokeFallbackTimer);
-    karaokeFallbackTimer = null;
-  }
-  currentExampleWordSpans.forEach(function(sp) {
-    sp.classList.remove("spoken", "speaking");
-  });
-
-}
-
-function setKaraokeWordIndex(activeIdx) {
-  // 하이라이트 및 글자 연해짐 효과 비활성화
-}
-
 function renderClickableExampleText(exTextEl, text) {
-  clearExampleKaraoke();
-  currentExampleWordSpans = [];
+  cancelHoverWordTranslate();
   currentExampleWordStarts = [];
   exTextEl.innerHTML = "";
 
-  const prefix = document.createTextNode("📝 ");
-  exTextEl.appendChild(prefix);
+  const frag = document.createDocumentFragment();
+  frag.appendChild(document.createTextNode("📝 "));
 
-  // 단어와 공백을 분리해 각 단어를 클릭 가능한 span으로 생성
   const regex = /(\S+|\s+)/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const token = match[0];
     const startPos = match.index;
     if (/^\s+$/.test(token)) {
-      exTextEl.appendChild(document.createTextNode(token));
+      frag.appendChild(document.createTextNode(token));
     } else {
-      const wordIdx = currentExampleWordSpans.length;
+      const wordIdx = currentExampleWordStarts.length;
       const span = document.createElement("span");
       span.className = "ex-word";
       span.textContent = token;
@@ -1786,132 +1739,35 @@ function renderClickableExampleText(exTextEl, text) {
         hideDragTransPopup();
         speakExampleFromWordIndex(wordIdx);
       };
-      span.onmouseenter = function(e) {
+      span.onmouseenter = function() {
         scheduleHoverWordTranslate(span, token);
       };
       span.onmouseleave = function() {
         cancelHoverWordTranslate();
       };
-      exTextEl.appendChild(span);
-      currentExampleWordSpans.push(span);
+      frag.appendChild(span);
       currentExampleWordStarts.push(startPos);
     }
   }
-}
-
-function findWordIndexByCharPos(charPos) {
-  const starts = currentExampleWordStarts;
-  if (starts.length === 0) return 0;
-  let idx = 0;
-  for (let i = 0; i < starts.length; i++) {
-    if (starts[i] <= charPos) idx = i;
-    else break;
-  }
-  return idx;
+  exTextEl.appendChild(frag);
 }
 
 function speakExampleFromWordIndex(startWordIdx) {
   const fullText = currentDisplayedExample || getExample(currentQuestion);
   if (!fullText) return;
-  const totalWords = currentExampleWordSpans.length;
+  const totalWords = currentExampleWordStarts.length;
   if (totalWords === 0) {
     speakText(fullText);
     return;
   }
   const safeStart = Math.max(0, Math.min(startWordIdx || 0, totalWords - 1));
   const charOffset = currentExampleWordStarts[safeStart] || 0;
-  const subText = fullText.slice(charOffset);
-
-  clearExampleKaraoke();
-  const mySession = ++karaokeSessionId;
-  setKaraokeWordIndex(safeStart);
-
-  try {
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(subText);
-      utter.lang = "en-US";
-      utter.rate = 0.95;
-
-      let boundaryFired = false;
-      utter.onboundary = function(e) {
-        if (mySession !== karaokeSessionId) return;
-        if (typeof e.charIndex === "number") {
-          boundaryFired = true;
-          if (karaokeFallbackTimer) {
-            clearInterval(karaokeFallbackTimer);
-            karaokeFallbackTimer = null;
-          }
-          const absChar = charOffset + e.charIndex;
-          const wIdx = findWordIndexByCharPos(absChar);
-          setKaraokeWordIndex(wIdx);
-        }
-      };
-
-      utter.onend = function() {
-        if (mySession !== karaokeSessionId) return;
-        clearExampleKaraoke();
-      };
-
-      utter.onerror = function() {
-        if (mySession !== karaokeSessionId) return;
-        clearExampleKaraoke();
-      };
-
-      // onboundary 미지원 모바일 브라우저용 추정 타이머 폴백
-      let estIdx = safeStart;
-      karaokeFallbackTimer = setInterval(function() {
-        if (mySession !== karaokeSessionId || boundaryFired) {
-          clearInterval(karaokeFallbackTimer);
-          karaokeFallbackTimer = null;
-          return;
-        }
-        estIdx++;
-        if (estIdx < totalWords) {
-          setKaraokeWordIndex(estIdx);
-        } else {
-          clearInterval(karaokeFallbackTimer);
-          karaokeFallbackTimer = null;
-        }
-      }, 360);
-
-      window.speechSynthesis.speak(utter);
-      return;
-    }
-  } catch (e) {}
-
-  // speechSynthesis 불가 시 구글 TTS 폴백 + 추정 바 이동
-  try {
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio = null;
-    }
-    const url = "https://translate.google.com/translate_tts?ie=UTF-8&client=gtx&tl=en-US&q=" + encodeURIComponent(subText);
-    currentAudio = new Audio(url);
-    let estIdx = safeStart;
-    karaokeFallbackTimer = setInterval(function() {
-      if (mySession !== karaokeSessionId) {
-        clearInterval(karaokeFallbackTimer);
-        karaokeFallbackTimer = null;
-        return;
-      }
-      estIdx++;
-      if (estIdx < totalWords) setKaraokeWordIndex(estIdx);
-    }, 360);
-    currentAudio.onended = function() {
-      if (mySession === karaokeSessionId) clearExampleKaraoke();
-    };
-    currentAudio.play().catch(function() {
-      if (mySession === karaokeSessionId) clearExampleKaraoke();
-    });
-  } catch (e) {
-    clearExampleKaraoke();
-  }
+  speakText(fullText.slice(charOffset));
 }
 
 function speakText(text) {
   if (!text) return;
-  clearExampleKaraoke();
+  cancelHoverWordTranslate();
   try {
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -2151,57 +2007,13 @@ function updateDeckSelectUI() {
 
 function updateTargetUI() {
   document.getElementById("targetStatusLabel").textContent = "📌 현재 세이브 지정 디렉토리 : [" + targetDeck + "]";
-  const targetLbl = document.getElementById("quizTargetLabel");
-  if (targetLbl) targetLbl.textContent = "저장될 곳: [" + targetDeck + "]";
-  const autoChk = document.getElementById("autoSaveWrongChk");
-  if (autoChk) autoChk.checked = autoSaveWrong;
-  const exChk = document.getElementById("autoExampleChk");
-  if (exChk) exChk.checked = autoFetchExample;
-  const hideChk = document.getElementById("hideOptionsChk");
-  if (hideChk) hideChk.checked = hideOptionsMode;
-  const nextChk = document.getElementById("autoNextChk");
-  if (nextChk) nextChk.checked = autoNextOnCorrect;
   updateQuizSaveBtnUI();
-}
-
-function onAutoSaveToggle() {
-  const autoChk = document.getElementById("autoSaveWrongChk");
-  autoSaveWrong = autoChk ? autoChk.checked : true;
-  saveAllState();
-}
-
-function onAutoExampleToggle() {
-  const exChk = document.getElementById("autoExampleChk");
-  autoFetchExample = exChk ? exChk.checked : true;
-  saveAllState();
-  if (inQuizMode && currentQuestion) {
-    updateQuizExampleUI();
-  }
-}
-
-function onHideOptionsToggle() {
-  const hideChk = document.getElementById("hideOptionsChk");
-  hideOptionsMode = hideChk ? hideChk.checked : true;
-  saveAllState();
-  if (inQuizMode && currentQuestion) {
-    if (!hideOptionsMode && !optionsVisible) {
-      revealOptions();
-    } else if (hideOptionsMode && optionsVisible && !currentAnsweredCorrectly) {
-      hideOptionsUI();
-    }
-  }
-}
-
-function onAutoNextToggle() {
-  const nextChk = document.getElementById("autoNextChk");
-  autoNextOnCorrect = nextChk ? nextChk.checked : false;
-  saveAllState();
 }
 
 function onDeckChange() {
   const sel = document.getElementById("deckSelect");
   currentDeck = sel.value;
-  saveAllState();
+  saveAllState(false);
   sel.blur();
   if (inQuizMode) {
     if (Object.keys(decks[currentDeck] || {}).length === 0) {
@@ -2337,7 +2149,7 @@ function closeTargetModal() {
 function confirmTargetSelection() {
   if (!pendingTargetChoice || !decks[pendingTargetChoice]) return;
   targetDeck = pendingTargetChoice;
-  saveAllState();
+  saveAllState(false);
   updateTargetUI();
   if (!inQuizMode) refreshWordList();
   closeTargetModal();
@@ -2423,6 +2235,95 @@ async function addWord() {
   refreshWordList();
 }
 
+let searchDebounceTimer = null;
+let filteredWordItems = [];
+let renderedWordCount = 0;
+const WORD_LIST_PAGE_SIZE = 100;
+
+function debouncedRefreshWordList() {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(function() {
+    searchDebounceTimer = null;
+    refreshWordList();
+  }, 180);
+}
+
+function appendWordListChunk() {
+  const container = document.getElementById("wordListContainer");
+  if (!container) return;
+  const oldMoreBtn = container.querySelector(".word-list-more-btn");
+  if (oldMoreBtn) oldMoreBtn.remove();
+
+  const end = Math.min(renderedWordCount + WORD_LIST_PAGE_SIZE, filteredWordItems.length);
+  const frag = document.createDocumentFragment();
+
+  for (let i = renderedWordCount; i < end; i++) {
+    const item = filteredWordItems[i];
+    const listIdx = i;
+
+    const row = document.createElement("div");
+    row.className = "word-item";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selectedListIndices.has(listIdx);
+    if (cb.checked) row.classList.add("selected");
+    cb.onclick = function(e) {
+      e.stopPropagation();
+      toggleSelectRow(listIdx, row, cb.checked);
+    };
+
+    const contentDiv = document.createElement("div");
+    contentDiv.className = "word-item-content";
+
+    const textSpan = document.createElement("span");
+    textSpan.textContent = "[" + (item.origIdx + 1) + "]  " + item.eng + "  :  " + item.kor;
+    if (isWordInTargetDeck(item.eng)) {
+      const badge = document.createElement("span");
+      badge.className = "saved-badge";
+      badge.textContent = "✔️ 이미 세이브됨";
+      textSpan.appendChild(badge);
+    }
+    contentDiv.appendChild(textSpan);
+
+    if (item.ex) {
+      const exSpan = document.createElement("span");
+      exSpan.className = "word-item-ex";
+      exSpan.textContent = "📝 " + item.ex;
+      contentDiv.appendChild(exSpan);
+    }
+
+    row.appendChild(cb);
+    row.appendChild(contentDiv);
+
+    row.onclick = function() {
+      cb.checked = !cb.checked;
+      toggleSelectRow(listIdx, row, cb.checked);
+    };
+
+    row.ondblclick = function() {
+      selectedListIndices.clear();
+      selectedListIndices.add(listIdx);
+      jumpToSelectedWord();
+    };
+
+    frag.appendChild(row);
+  }
+
+  renderedWordCount = end;
+  if (renderedWordCount < filteredWordItems.length) {
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "word-list-more-btn btn-blue";
+    moreBtn.style.cssText = "width:100%; border-radius:0; padding:10px; border:none; border-top:1px solid #cfd8dc;";
+    moreBtn.textContent = "▼ 더 보기 (남은 " + (filteredWordItems.length - renderedWordCount) + "개)";
+    moreBtn.onclick = appendWordListChunk;
+    frag.appendChild(moreBtn);
+  }
+
+  container.appendChild(frag);
+}
+
 function refreshWordList() {
   const container = document.getElementById("wordListContainer");
   const keyword = (document.getElementById("searchInput").value || "").trim().toLowerCase();
@@ -2431,64 +2332,29 @@ function refreshWordList() {
 
   container.innerHTML = "";
   displayedKeys = [];
+  filteredWordItems = [];
+  renderedWordCount = 0;
   selectedListIndices.clear();
 
-  entries.forEach(function(entry, idx) {
-    const eng = entry[0];
-    const kor = entry[1];
+  for (let idx = 0; idx < entries.length; idx++) {
+    const eng = entries[idx][0];
+    const kor = entries[idx][1];
     const aiExList = getSavedAiExamples(eng);
     const ex = getExample(eng) || (aiExList.length > 0 ? aiExList[aiExList.length - 1].ex : "");
     if (!keyword || eng.toLowerCase().includes(keyword) || kor.toLowerCase().includes(keyword) || ex.toLowerCase().includes(keyword)) {
-      const listIdx = displayedKeys.length;
       displayedKeys.push(eng);
-
-      const row = document.createElement("div");
-      row.className = "word-item";
-
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.onclick = function(e) {
-        e.stopPropagation();
-        toggleSelectRow(listIdx, row, cb.checked);
-      };
-
-      const contentDiv = document.createElement("div");
-      contentDiv.className = "word-item-content";
-
-      const textSpan = document.createElement("span");
-      textSpan.textContent = "[" + (idx + 1) + "]  " + eng + "  :  " + kor;
-      if (isWordInTargetDeck(eng)) {
-        const badge = document.createElement("span");
-        badge.className = "saved-badge";
-        badge.textContent = "✔️ 이미 세이브됨";
-        textSpan.appendChild(badge);
-      }
-      contentDiv.appendChild(textSpan);
-
-      if (ex) {
-        const exSpan = document.createElement("span");
-        exSpan.className = "word-item-ex";
-        exSpan.textContent = "📝 " + ex;
-        contentDiv.appendChild(exSpan);
-      }
-
-      row.appendChild(cb);
-      row.appendChild(contentDiv);
-
-      row.onclick = function() {
-        cb.checked = !cb.checked;
-        toggleSelectRow(listIdx, row, cb.checked);
-      };
-
-      row.ondblclick = function() {
-        selectedListIndices.clear();
-        selectedListIndices.add(listIdx);
-        jumpToSelectedWord();
-      };
-
-      container.appendChild(row);
+      filteredWordItems.push({ origIdx: idx, eng: eng, kor: kor, ex: ex });
     }
-  });
+  }
+
+  appendWordListChunk();
+
+  container.onscroll = function() {
+    if (renderedWordCount < filteredWordItems.length &&
+        container.scrollTop + container.clientHeight >= container.scrollHeight - 80) {
+      appendWordListChunk();
+    }
+  };
 
   const currIdx = getCurrentIndex();
   const total = entries.length;
@@ -2569,7 +2435,7 @@ function jumpToSelectedWord() {
   const realIdx = allKeys.indexOf(targetEng);
   if (realIdx !== -1) {
     progress[currentDeck] = realIdx;
-    saveAllState();
+    saveAllState(false);
     showQuizScreen();
   }
 }
@@ -2602,7 +2468,7 @@ function loadQuestionAtCurrentIndex() {
   }
 
   const idx = getCurrentIndex();
-  saveAllState();
+  saveAllState(false);
 
   currentQuestion = engWords[idx];
   const correctAnswer = words[currentQuestion];
@@ -2652,7 +2518,6 @@ function onOptBtn0Click() {
 function renderQuizExample(word, exText, isManual, fromHistoryNav) {
   const exBox = document.getElementById("quizExampleBox");
   const exTextEl = document.getElementById("quizExampleText");
-  const exBtn = document.getElementById("quizExampleBtn");
   const transEl = document.getElementById("quizExampleTrans");
   if (!exBox || !exTextEl) return;
 
@@ -2681,7 +2546,6 @@ function renderQuizExample(word, exText, isManual, fromHistoryNav) {
   if (currentDisplayedExample) {
     renderClickableExampleText(exTextEl, currentDisplayedExample);
     exBox.style.display = "flex";
-    if (exBtn) exBtn.textContent = isManual ? "📝 예문 수정 (E)" : "📝 예문 직접 수정 (E)";
     if (optionsVisible) {
       updateQuizExampleTranslationUI();
       if (pendingSpeakExampleWord === word) {
@@ -2693,10 +2557,8 @@ function renderQuizExample(word, exText, isManual, fromHistoryNav) {
       transEl.textContent = "";
     }
   } else {
-    clearExampleKaraoke();
     exTextEl.textContent = "";
     exBox.style.display = "none";
-    if (exBtn) exBtn.textContent = "📝 예문 추가 (E)";
     if (transEl) {
       transEl.style.display = "none";
       transEl.textContent = "";
@@ -2707,7 +2569,6 @@ function renderQuizExample(word, exText, isManual, fromHistoryNav) {
 function updateQuizExampleUI(forceDifferent) {
   const exBox = document.getElementById("quizExampleBox");
   const exTextEl = document.getElementById("quizExampleText");
-  const exBtn = document.getElementById("quizExampleBtn");
   const transEl = document.getElementById("quizExampleTrans");
   if (!exBox || !exTextEl) return;
 
@@ -2771,7 +2632,6 @@ function updateQuizExampleUI(forceDifferent) {
       ? "✨ AI가 새로운 예문 생성 중... (" + (savedAiList.length + 1) + "/" + MAX_SAVED_AI_EXAMPLES + ")"
       : "✨ AI가 새로운 예문 생성 중...";
     exBox.style.display = "flex";
-    if (exBtn) exBtn.textContent = "📝 예문 직접 수정 (E)";
     autoFetchGeminiExampleForWord(word, kor, reqId, geminiKey);
     return;
   }
@@ -2813,7 +2673,7 @@ async function autoFetchGeminiExampleForWord(word, kor, reqId, apiKey) {
     // 8개 미만일 때만 백업 저장소에 영구 저장, 8개가 꽉 찼으면 저장하지 않고 바로 표시
     const didSave = addSavedAiExample(word, res.example, res.translation);
     if (didSave) {
-      saveAllState();
+      saveAllState(false);
     }
     lastShownExampleMap[wordKey] = res.example;
 
@@ -2838,29 +2698,118 @@ async function autoFetchGeminiExampleForWord(word, kor, reqId, apiKey) {
 }
 
 
-function findNextRoundPrefetchTarget() {
+const AI_BATCH_SIZE = 5;
+
+async function callGeminiBatchExamplesAPI(items, apiKey, model, signal) {
+  const lines = items.map(function(it, i) {
+    const avoid = (it.prevList && it.prevList.length > 0)
+      ? " | Avoid: " + it.prevList.slice(-4).join(" / ")
+      : "";
+    return (i + 1) + ". "" + it.word + "" (Korean: "" + (it.kor || "") + "")" + avoid;
+  }).join("\n");
+
+  const promptText =
+    "Create ONE natural, practical English example sentence (8 to 18 words) and its natural Korean translation for EACH word below.\n" +
+    "Each sentence must use the exact English word/phrase and vary in topic.\n" +
+    "Words:\n" + lines + "\n\n" +
+    "Return ONLY a valid JSON array of objects with keys: "word", "example", "translation".";
+
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: signal,
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: promptText }] }],
+      generationConfig: {
+        temperature: 1.0,
+        responseMimeType: "application/json"
+      }
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(function() { return ""; });
+    const err = new Error("API 오류 (" + res.status + ")" + (errText ? ": " + errText.slice(0, 140) : ""));
+    err.status = res.status;
+    throw err;
+  }
+
+  const data = await res.json();
+  const rawText = data && data.candidates && data.candidates[0] &&
+                  data.candidates[0].content && data.candidates[0].content.parts &&
+                  data.candidates[0].content.parts[0] ? data.candidates[0].content.parts[0].text : "";
+  if (!rawText) throw new Error("빈 응답");
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (e) {
+    const match = rawText.match(/\[[\s\S]*\]/);
+    if (match) parsed = JSON.parse(match[0]);
+  }
+  if (!Array.isArray(parsed)) throw new Error("배열 JSON 파싱 실패");
+  return parsed;
+}
+
+async function resolveAndCallGeminiBatch(items, apiKey, preferredModel, signal) {
+  if (preferredModel && preferredModel !== "auto") {
+    try {
+      const list = await callGeminiBatchExamplesAPI(items, apiKey, preferredModel, signal);
+      return { list: list, usedModel: preferredModel };
+    } catch (err) {
+      if (err.status !== 404) throw err;
+    }
+  }
+  const available = await fetchAvailableGeminiModels(apiKey, signal);
+  const tryOrder = available.length > 0
+    ? available.slice(0, 5)
+    : ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash-lite"];
+
+  let lastErr = new Error("사용 가능한 모델을 찾지 못했습니다.");
+  for (let i = 0; i < tryOrder.length; i++) {
+    const candidate = tryOrder[i];
+    if (candidate === preferredModel) continue;
+    try {
+      const list = await callGeminiBatchExamplesAPI(items, apiKey, candidate, signal);
+      return { list: list, usedModel: candidate };
+    } catch (err) {
+      lastErr = err;
+      if (err.name === "AbortError" || err.status === 401 || err.status === 403) throw err;
+    }
+  }
+  throw lastErr;
+}
+
+function findNextRoundPrefetchTargets(maxCount, includeCurrent) {
   const words = decks[currentDeck] || {};
   const engWords = Object.keys(words);
-  if (engWords.length === 0) return null;
+  if (engWords.length === 0) return [];
 
   const startIdx = getCurrentIndex();
-  // 라운드별 너비 우선 탐색: 0개 -> 1개 -> 2개 -> 3개 순으로 (1 1 1... -> 2 1 1... -> 2 2 1... -> 4 4 4...)
-  for (let targetLevel = 0; targetLevel < MAX_SAVED_AI_EXAMPLES; targetLevel++) {
-    for (let offset = 1; offset <= engWords.length; offset++) {
+  const results = [];
+  const pickedKeys = new Set();
+
+  for (let targetLevel = 0; targetLevel < MAX_SAVED_AI_EXAMPLES && results.length < maxCount; targetLevel++) {
+    const startOffset = includeCurrent ? 0 : 1;
+    for (let offset = startOffset; offset < engWords.length + startOffset && results.length < maxCount; offset++) {
       const idx = (startIdx + offset) % engWords.length;
       const w = engWords[idx];
       if (!w) continue;
-      if (w === currentQuestion && targetLevel === 0) continue;
+      if (!includeCurrent && w === currentQuestion && targetLevel === 0) continue;
       if (isManualExample(w) && getExample(w)) continue;
       const wKey = w.trim().toLowerCase();
-      if (prefetchInFlightSet.has(wKey)) continue;
-      const savedCount = getSavedAiExamples(w).length;
-      if (savedCount === targetLevel) {
-        return { word: w, wordKey: wKey, kor: words[w] || "", savedCount: savedCount };
+      if (pickedKeys.has(wKey) || prefetchInFlightSet.has(wKey)) continue;
+      const savedList = getSavedAiExamples(w);
+      if (savedList.length === targetLevel) {
+        pickedKeys.add(wKey);
+        const recentShown = aiShownHistoryMap[wKey] || [];
+        const prevList = Array.from(new Set(savedList.map(function(item) { return item.ex; }).concat(recentShown)));
+        results.push({ word: w, wordKey: wKey, kor: words[w] || "", savedCount: savedList.length, prevList: prevList });
       }
     }
   }
-  return null;
+  return results;
 }
 
 function schedulePrefetchNextWord(delayMs) {
@@ -2877,56 +2826,54 @@ function schedulePrefetchNextWord(delayMs) {
     prefetchTimer = null;
     if (!inQuizMode || !autoFetchExample || batchPrefetchRunning) return;
 
-    const target = findNextRoundPrefetchTarget();
-    if (!target) return; // 현재 단어장의 모든 단어가 4개씩 다 채워짐
+    const targets = findNextRoundPrefetchTargets(AI_BATCH_SIZE, false);
+    if (targets.length === 0) return;
 
-    prefetchInFlightSet.add(target.wordKey);
-    const savedAiList = getSavedAiExamples(target.word);
-    const recentShown = aiShownHistoryMap[target.wordKey] || [];
-    const prevList = Array.from(new Set(savedAiList.map(function(item) { return item.ex; }).concat(recentShown)));
+    targets.forEach(function(t) { prefetchInFlightSet.add(t.wordKey); });
+    const targetByKey = {};
+    targets.forEach(function(t) { targetByKey[t.wordKey] = t; });
 
     const controller = new AbortController();
-    const timer = setTimeout(function() { controller.abort(); }, 18000);
-    let nextDelay = 4500; // 무료 API 한도 보호를 위한 연속 생성 안전 간격 (4.5초)
+    const timer = setTimeout(function() { controller.abort(); }, 25000);
+    let nextDelay = 5000;
     try {
-      const out = await resolveAndCallGemini(target.word, target.kor, prevList, apiKey, getGeminiModel(), controller.signal);
+      const out = await resolveAndCallGeminiBatch(targets, apiKey, getGeminiModel(), controller.signal);
       clearTimeout(timer);
       if (out.usedModel && out.usedModel !== getGeminiModel()) {
         safeSetStorage("vocab_gemini_model", out.usedModel);
       }
-      const res = out.res;
-      if (res && res.example) {
+      let anySaved = false;
+      (out.list || []).forEach(function(item, idx) {
+        if (!item || !item.example) return;
+        const itemKey = item.word ? String(item.word).trim().toLowerCase() : "";
+        const target = targetByKey[itemKey] || targets[idx];
+        if (!target) return;
+        const exText = String(item.example).trim();
+        const koText = item.translation ? String(item.translation).trim() : "";
+
         if (!Array.isArray(aiShownHistoryMap[target.wordKey])) aiShownHistoryMap[target.wordKey] = [];
-        aiShownHistoryMap[target.wordKey].push(res.example);
+        aiShownHistoryMap[target.wordKey].push(exText);
         if (aiShownHistoryMap[target.wordKey].length > 25) aiShownHistoryMap[target.wordKey].shift();
 
-        if (res.translation) {
-          sessionExampleTransMap[res.example] = res.translation;
-        }
-        const didSave = addSavedAiExample(target.word, res.example, res.translation);
-        if (didSave) {
-          saveAllState();
+        if (koText) sessionExampleTransMap[exText] = koText;
+        if (addSavedAiExample(target.word, exText, koText)) {
+          anySaved = true;
         }
         if (!prefetchedExampleMap[target.wordKey]) {
-          prefetchedExampleMap[target.wordKey] = { example: res.example, translation: res.translation || "" };
+          prefetchedExampleMap[target.wordKey] = { example: exText, translation: koText };
         }
         if (target.word === currentQuestion) {
           updateRefreshExampleBtnLabel(currentQuestion);
         }
-      }
+      });
+      if (anySaved) saveAllState(false);
     } catch (e) {
       clearTimeout(timer);
-      // 429 한도 초과 시 60초 휴식 후 자동 재개
-      if (e && e.status === 429) {
-        nextDelay = 60000;
-      } else {
-        nextDelay = 8000;
-      }
+      nextDelay = (e && e.status === 429) ? 60000 : 8000;
     } finally {
-      prefetchInFlightSet.delete(target.wordKey);
+      targets.forEach(function(t) { prefetchInFlightSet.delete(t.wordKey); });
     }
 
-    // 다음 -> 다다음 -> 다다다음... 계속 연속으로 백그라운드 생성
     if (inQuizMode && autoFetchExample && !batchPrefetchRunning) {
       schedulePrefetchNextWord(nextDelay);
     }
@@ -2955,8 +2902,8 @@ async function toggleBatchPrefetchExamples() {
 
   const startIdx = getCurrentIndex();
   const countStr = prompt(
-    "[" + currentDeck + "]의 " + (startIdx + 1) + "번 단어부터 라운드 순서(1개씩 전체 → 2개씩 전체 → 3개 → 4개)로 예문을 미리 생성합니다.\n총 몇 개의 예문을 미리 생성할까요? (무료 API 한도 보호를 위해 10~30개 권장)",
-    "20"
+    "[" + currentDeck + "]의 " + (startIdx + 1) + "번 단어부터 라운드 순서(1개씩 전체 → 2개씩 전체 → 3개 → 4개)로 " + AI_BATCH_SIZE + "개씩 묶어 예문을 미리 생성합니다.\n총 몇 개의 예문을 미리 생성할까요? (25~100개 권장)",
+    "30"
   );
   if (!countStr) return;
   const targetCount = Math.max(1, Math.min(200, parseInt(countStr, 10) || 0));
@@ -2966,49 +2913,53 @@ async function toggleBatchPrefetchExamples() {
   let created = 0;
   let failed = 0;
 
-  // 0개 -> 1개 -> 2개 -> 3개 라운드 순으로 전체 단어를 돌며 균등하게 채움
-  for (let targetLevel = 0; targetLevel < MAX_SAVED_AI_EXAMPLES && created < targetCount; targetLevel++) {
-    for (let offset = 0; offset < engWords.length && created < targetCount; offset++) {
-      if (!batchPrefetchRunning) break;
-      const w = engWords[(startIdx + offset) % engWords.length];
-      if (isManualExample(w) && getExample(w)) continue;
-      const savedList = getSavedAiExamples(w);
-      if (savedList.length !== targetLevel) continue;
+  while (batchPrefetchRunning && created < targetCount) {
+    const batchSize = Math.min(AI_BATCH_SIZE, targetCount - created);
+    const targets = findNextRoundPrefetchTargets(batchSize, true);
+    if (targets.length === 0) break;
 
-      if (btn) btn.textContent = "⏹️ 생성 중 (" + (created + 1) + "/" + targetCount + " · " + (targetLevel + 1) + "회차) · 클릭 시 중지";
+    const targetByKey = {};
+    targets.forEach(function(t) { targetByKey[t.wordKey] = t; });
+    if (btn) btn.textContent = "⏹️ 묶음 생성 중 (" + created + "/" + targetCount + ") · 클릭 시 중지";
 
-      const kor = words[w] || "";
-      const prevList = savedList.map(function(item) { return item.ex; });
-      const controller = new AbortController();
-      const timer = setTimeout(function() { controller.abort(); }, 18000);
-      try {
-        const out = await resolveAndCallGemini(w, kor, prevList, apiKey, getGeminiModel(), controller.signal);
-        clearTimeout(timer);
-        if (out.usedModel && out.usedModel !== getGeminiModel()) {
-          safeSetStorage("vocab_gemini_model", out.usedModel);
-        }
-        if (out.res && out.res.example) {
-          if (addSavedAiExample(w, out.res.example, out.res.translation)) {
-            saveAllState();
-          }
-          created++;
-          if (!inQuizMode) refreshWordList();
-        }
-      } catch (err) {
-        clearTimeout(timer);
-        failed++;
-        if (err && err.status === 429) {
-          alert("⚠️ Gemini API 호출 한도(429)에 도달해 미리 생성을 일시 중단합니다. (" + created + "개 완료)");
-          batchPrefetchRunning = false;
-          break;
-        }
+    const controller = new AbortController();
+    const timer = setTimeout(function() { controller.abort(); }, 25000);
+    try {
+      const out = await resolveAndCallGeminiBatch(targets, apiKey, getGeminiModel(), controller.signal);
+      clearTimeout(timer);
+      if (out.usedModel && out.usedModel !== getGeminiModel()) {
+        safeSetStorage("vocab_gemini_model", out.usedModel);
       }
-
-      if (batchPrefetchRunning && created < targetCount) {
-        await new Promise(function(r) { setTimeout(r, 2500); });
+      let anySaved = false;
+      (out.list || []).forEach(function(item, idx) {
+        if (!item || !item.example) return;
+        const itemKey = item.word ? String(item.word).trim().toLowerCase() : "";
+        const target = targetByKey[itemKey] || targets[idx];
+        if (!target) return;
+        const exText = String(item.example).trim();
+        const koText = item.translation ? String(item.translation).trim() : "";
+        if (addSavedAiExample(target.word, exText, koText)) {
+          anySaved = true;
+          created++;
+        }
+      });
+      if (anySaved) {
+        saveAllState(false);
+        if (!inQuizMode) refreshWordList();
+      }
+    } catch (err) {
+      clearTimeout(timer);
+      failed += targets.length;
+      if (err && err.status === 429) {
+        alert("⚠️ Gemini API 호출 한도(429)에 도달해 미리 생성을 일시 중단합니다. (" + created + "개 완료)");
+        batchPrefetchRunning = false;
+        break;
       }
     }
-    if (!batchPrefetchRunning) break;
+
+    if (batchPrefetchRunning && created < targetCount) {
+      await new Promise(function(r) { setTimeout(r, 2500); });
+    }
   }
 
   batchPrefetchRunning = false;
@@ -3087,7 +3038,7 @@ function saveExampleFromModal() {
   if (!editingExampleWord) return;
   const exVal = document.getElementById("exampleTextarea").value.trim();
   setExample(editingExampleWord, exVal, true);
-  saveAllState();
+  saveAllState(false);
   if (inQuizMode) {
     updateQuizExampleUI(false);
     const feedbackEl = document.getElementById("feedbackLabel");
@@ -3115,7 +3066,7 @@ function deleteExampleFromModal() {
     setExample(editingExampleWord, "", false);
     const aiMap = getSavedAiExamplesMap();
     delete aiMap[wordKey];
-    saveAllState();
+    saveAllState(false);
     if (inQuizMode) updateQuizExampleUI(false);
     else refreshWordList();
     closeExampleModal();
@@ -3148,7 +3099,7 @@ async function fetchDictionaryExample() {
     const aiRes = out.res;
     if (aiRes && aiRes.example) {
       if (addSavedAiExample(word, aiRes.example, aiRes.translation)) {
-        saveAllState();
+        saveAllState(false);
       }
       ta.value = aiRes.example;
       speakText(aiRes.example);
@@ -3207,7 +3158,7 @@ async function updateQuizExampleTranslationUI() {
   const translated = await fetchKoreanTranslation(ex);
   if (translated) {
     setExampleTranslation(ex, translated);
-    saveAllState();
+    saveAllState(false);
     if (inQuizMode && optionsVisible && currentQuestion === word && currentDisplayedExample === ex) {
       transEl.textContent = "💬 " + translated;
       transEl.style.display = "block";
@@ -3278,7 +3229,7 @@ function prevQuestion() {
   if (len === 0) return;
   const idx = getCurrentIndex();
   progress[currentDeck] = (idx - 1 + len) % len;
-  saveAllState();
+  saveAllState(false);
   loadQuestionAtCurrentIndex();
 }
 
@@ -3293,14 +3244,14 @@ function advanceAndNext() {
   } else {
     progress[currentDeck] = idx + 1;
   }
-  saveAllState();
+  saveAllState(false);
   loadQuestionAtCurrentIndex();
 }
 
 function resetDeckProgress() {
   if (confirm("[" + currentDeck + "]의 진행 위치를 1번 단어로 되돌리시겠습니까?")) {
     progress[currentDeck] = 0;
-    saveAllState();
+    saveAllState(false);
     loadQuestionAtCurrentIndex();
   }
 }
@@ -3660,7 +3611,7 @@ function scheduleCloudPush() {
         statusEl.textContent = "☁️ 클라우드 동기화 완료 (" + new Date().toLocaleTimeString() + ")";
       }
     } catch (e) {}
-  }, 600);
+  }, 2500);
 }
 
 async function cloudPull(showAlert) {
