@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>단어 암기 웹 v7.37 Web (성능·동기화·AI 배치 최적화)</title>
+<title>단어 암기 웹 v7.39 Web (클라우드 동기화 UI 통합 & 최적화)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -577,8 +577,7 @@
       🟢 로컬 자동저장 작동 중 (진행상황 100% 보존)
     </div>
     <div class="sync-actions">
-      <button type="button" class="btn-blue" onclick="openCloudModal()">☁️ 폰·PC 실시간 동기화 설정</button>
-      <button type="button" onclick="cloudPull(true)" id="btnCloudPull" style="display:none;">⬇️ 클라우드에서 불러오기</button>
+      <button type="button" class="btn-blue" id="btnCloudOpen" onclick="openCloudModal()">☁️ 클라우드 동기화</button>
       <button type="button" onclick="exportAllData()">📤 데이터 파일 백업</button>
       <button type="button" onclick="document.getElementById('fileImportInput').click()">📥 기존 JSON 불러오기</button>
       <input type="file" id="fileImportInput" accept=".json" multiple style="display:none" onchange="importJsonFiles(event)">
@@ -716,10 +715,10 @@
 <!-- 모달 2: 클라우드 동기화 설정 (GitHub Gist) -->
 <div class="modal-overlay" id="cloudModal">
   <div class="modal-box">
-    <h3 class="modal-title">☁️ 폰 ↔ PC 실시간 클라우드 동기화 설정</h3>
+    <h3 class="modal-title">☁️ 폰 ↔ PC 수동 클라우드 동기화</h3>
     <p style="margin:0; font-size:13px; color:#444; line-height:1.5;">
-      무료 <b>GitHub Gist</b> 토큰을 한 번만 연결해 두면, 문제를 풀거나 오답노트에 세이브할 때마다 인터넷에 자동 저장되어 <b>스마트폰과 컴퓨터 어디서나 이어서 학습</b>할 수 있습니다.<br>
-      <span style="color:#1565c0;">(설정하지 않아도 현재 기기 브라우저에는 100% 자동 저장됩니다.)</span>
+      무료 <b>GitHub Gist</b> 토큰을 입력한 뒤 <b>[⬆️ 올리기]</b>로 현재 학습 데이터를 업로드하거나 <b>[⬇️ 불러오기]</b>로 다른 기기의 데이터를 가져올 수 있습니다.<br>
+      <span style="color:#1565c0;">(평소에는 현재 기기 브라우저에만 자동 저장되어 데이터와 배터리를 아낍니다.)</span>
     </p>
     <div style="display:flex; flex-direction:column; gap:6px;">
       <label style="font-weight:bold; font-size:14px;">1. GitHub Personal Access Token (gist 권한 체크):</label>
@@ -727,11 +726,13 @@
       <label style="font-weight:bold; font-size:14px; margin-top:4px;">2. Gist ID (비워두면 새 저장소를 자동 생성합니다):</label>
       <input type="text" id="gistIdInput" class="text-input" placeholder="자동 생성됨 (다른 기기 연결 시 복사해서 입력)">
     </div>
-    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;">
-      <button type="button" class="btn-blue" style="flex:1;" onclick="saveCloudConfig()">연결 및 현재 데이터 업로드</button>
-      <button type="button" class="btn-green" onclick="cloudPull(true)">클라우드에서 덮어쓰기</button>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px;">
+      <button type="button" class="btn-blue" id="btnCloudPush" style="padding:10px;" onclick="cloudPush(true)">⬆️ 올리기</button>
+      <button type="button" class="btn-green" id="btnCloudPull" style="padding:10px;" onclick="cloudPull(true)">⬇️ 불러오기</button>
+    </div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+      <button type="button" class="btn-yellow" style="flex:1;" onclick="closeCloudModal(); openAiModal();">✨ AI 키 설정</button>
       <button type="button" class="btn-outline-red" onclick="disconnectCloud()">연결 해제</button>
-      <button type="button" class="btn-yellow" onclick="closeCloudModal(); openAiModal();">✨ AI 키 설정</button>
       <button type="button" onclick="closeCloudModal()">닫기</button>
     </div>
   </div>
@@ -845,7 +846,6 @@ let inQuizMode = true;
 let displayedKeys = [];
 let selectedListIndices = new Set();
 let pendingTargetChoice = "";
-let syncTimeout = null;
 let autoSaveWrong = true;
 let autoFetchExample = true;
 let hideOptionsMode = true;
@@ -939,12 +939,7 @@ function initApp() {
   updateTargetUI();
   updateSyncBanner();
 
-  // 클라우드 설정이 있으면 시작 시 최신 데이터 자동 확인
-  const token = safeGetStorage("vocab_gist_token");
-  const gistId = safeGetStorage("vocab_gist_id");
-  if (token && gistId) {
-    cloudPull(false);
-  }
+  // 수동 동기화 모드: 시작 시 자동 네트워크 요청 없이 로컬 데이터로 즉시 시작
 
   // 시작 시 바로 이어서 퀴즈 가능하도록 퀴즈 화면 표시 (단어 없으면 관리 화면)
   if (Object.keys(decks[currentDeck] || {}).length > 0) {
@@ -965,7 +960,7 @@ function saveAllState(decksChanged) {
     safeSetStorage("vocab_v72_decks", JSON.stringify(decks));
   }
   safeSetStorage("vocab_v72_progress", JSON.stringify(progress));
-  scheduleCloudPush();
+  markCloudDirty();
 }
 
 function getCurrentIndex() {
@@ -2889,7 +2884,7 @@ async function toggleBatchPrefetchExamples() {
   }
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
-    alert("먼저 상단의 [☁️ 폰·PC 실시간 동기화 설정] → [✨ AI 키 설정]에서 Gemini API 키를 연결해주세요.");
+    alert("먼저 상단의 [☁️ 클라우드 동기화] → [✨ AI 키 설정]에서 Gemini API 키를 연결해주세요.");
     return;
   }
 
@@ -3496,21 +3491,56 @@ function importJsonFiles(event) {
   event.target.value = "";
 }
 
-// --- 11. 폰 ↔ PC 실시간 클라우드 동기화 (GitHub Gist API) ---
-function updateSyncBanner() {
+// --- 11. 폰 ↔ PC 수동 클라우드 동기화 (GitHub Gist API) ---
+function isCloudConnected() {
+  return !!(safeGetStorage("vocab_gist_token") && safeGetStorage("vocab_gist_id"));
+}
+
+function isCloudDirty() {
+  return safeGetStorage("vocab_cloud_dirty") === "1";
+}
+
+function markCloudDirty() {
+  if (!isCloudConnected()) return;
+  if (!isCloudDirty()) {
+    safeSetStorage("vocab_cloud_dirty", "1");
+    updateSyncBanner();
+  }
+}
+
+function clearCloudDirty() {
+  safeRemoveStorage("vocab_cloud_dirty");
+}
+
+function updateSyncBanner(customMessage) {
   const token = safeGetStorage("vocab_gist_token");
   const gistId = safeGetStorage("vocab_gist_id");
   const statusEl = document.getElementById("syncStatusText");
-  const pullBtn = document.getElementById("btnCloudPull");
+  const openBtn = document.getElementById("btnCloudOpen");
 
   if (token && gistId) {
-    statusEl.textContent = "☁️ 클라우드 실시간 동기화 켜짐 (ID: " + gistId.slice(0, 6) + "...)";
-    statusEl.style.color = "#1565c0";
-    pullBtn.style.display = "inline-block";
+    const dirty = isCloudDirty();
+    if (customMessage) {
+      statusEl.textContent = customMessage;
+      statusEl.style.color = "#1565c0";
+    } else if (dirty) {
+      statusEl.textContent = "🟠 미동기화 변경사항 있음 ([☁️ 클라우드 동기화]에서 올리기)";
+      statusEl.style.color = "#e65100";
+    } else {
+      statusEl.textContent = "☁️ 수동 동기화 연결됨 (ID: " + gistId.slice(0, 6) + "...)";
+      statusEl.style.color = "#1565c0";
+    }
+    if (openBtn) {
+      openBtn.className = dirty ? "btn-orange" : "btn-blue";
+      openBtn.textContent = dirty ? "☁️ 클라우드 동기화 *" : "☁️ 클라우드 동기화";
+    }
   } else {
     statusEl.textContent = "🟢 기기 내부 자동저장 작동 중 (진행상황 보존됨)";
     statusEl.style.color = "#37474f";
-    pullBtn.style.display = "none";
+    if (openBtn) {
+      openBtn.className = "btn-blue";
+      openBtn.textContent = "☁️ 클라우드 동기화";
+    }
   }
 }
 
@@ -3527,38 +3557,48 @@ function closeCloudModal() {
 function disconnectCloud() {
   safeRemoveStorage("vocab_gist_token");
   safeRemoveStorage("vocab_gist_id");
+  clearCloudDirty();
   updateSyncBanner();
   closeCloudModal();
   alert("클라우드 연결이 해제되었습니다. (기기 내부 저장은 계속 작동합니다)");
 }
 
-async function saveCloudConfig() {
-  const token = document.getElementById("gistTokenInput").value.trim();
-  let gistId = document.getElementById("gistIdInput").value.trim();
+async function cloudPush(showAlert) {
+  const tokenInp = document.getElementById("gistTokenInput");
+  const gistInp = document.getElementById("gistIdInput");
+  const token = (tokenInp ? tokenInp.value.trim() : "") || safeGetStorage("vocab_gist_token") || "";
+  let gistId = (gistInp ? gistInp.value.trim() : "") || safeGetStorage("vocab_gist_id") || "";
 
   if (!token) {
-    alert("GitHub Personal Access Token을 입력해주세요.");
+    if (showAlert) alert("GitHub Personal Access Token을 입력해주세요.");
     return;
   }
 
-  safeSetStorage("vocab_gist_token", token);
+  const pushBtn = document.getElementById("btnCloudPush");
+  const statusEl = document.getElementById("syncStatusText");
+  if (pushBtn) {
+    pushBtn.disabled = true;
+    pushBtn.textContent = "⏳ 올리는 중...";
+  }
+  if (statusEl) {
+    statusEl.textContent = "🔄 클라우드에 업로드 중...";
+    statusEl.style.color = "#1565c0";
+  }
+
+  const isNewGist = !gistId;
   const payload = {
     description: "Vocab Game v7.2 Cloud Sync Data",
     public: false,
     files: {
       "vocab_sync_data.json": {
-        content: JSON.stringify({ decks: decks, progress: progress, updated_at: new Date().toISOString() }, null, 2)
+        content: JSON.stringify({ decks: decks, progress: progress, updated_at: new Date().toISOString() })
       }
     }
   };
 
   try {
-    let url = "https://api.github.com/gists";
-    let method = "POST";
-    if (gistId) {
-      url = "https://api.github.com/gists/" + gistId;
-      method = "PATCH";
-    }
+    const url = isNewGist ? "https://api.github.com/gists" : "https://api.github.com/gists/" + gistId;
+    const method = isNewGist ? "POST" : "PATCH";
 
     const res = await fetch(url, {
       method: method,
@@ -3569,57 +3609,60 @@ async function saveCloudConfig() {
       },
       body: JSON.stringify(payload)
     });
-
-    if (!res.ok) throw new Error("GitHub API 인증 또는 ID를 확인해주세요.");
+    if (!res.ok) throw new Error("GitHub API 인증 또는 Gist ID를 확인해주세요. (HTTP " + res.status + ")");
     const data = await res.json();
+
+    safeSetStorage("vocab_gist_token", token);
     safeSetStorage("vocab_gist_id", data.id);
-    document.getElementById("gistIdInput").value = data.id;
-    updateSyncBanner();
-    alert("클라우드 동기화 연결 성공!\nGist ID: " + data.id + "\n\n다른 기기(스마트폰/PC)에서도 동일한 Token과 Gist ID를 입력하면 진행상황이 실시간 연동됩니다.");
-    closeCloudModal();
+    if (gistInp) gistInp.value = data.id;
+    clearCloudDirty();
+    updateSyncBanner("☁️ 클라우드 업로드 완료 (" + new Date().toLocaleTimeString() + ")");
+
+    if (showAlert) {
+      if (isNewGist) {
+        alert("클라우드 연결 및 업로드 성공!\nGist ID: " + data.id + "\n\n다른 기기에서도 동일한 Token과 Gist ID를 입력하면 데이터를 불러올 수 있습니다.");
+      } else {
+        alert("클라우드에 최신 데이터를 업로드했습니다!");
+      }
+      closeCloudModal();
+    }
   } catch (err) {
-    alert("클라우드 연결 실패: " + err.message);
+    updateSyncBanner();
+    if (showAlert) alert("클라우드 업로드 실패: " + err.message);
+  } finally {
+    if (pushBtn) {
+      pushBtn.disabled = false;
+      pushBtn.textContent = "⬆️ 올리기";
+    }
   }
 }
 
-function scheduleCloudPush() {
-  const token = safeGetStorage("vocab_gist_token");
-  const gistId = safeGetStorage("vocab_gist_id");
-  if (!token || !gistId) return;
-
-  if (syncTimeout) clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(async function() {
-    try {
-      const statusEl = document.getElementById("syncStatusText");
-      statusEl.textContent = "🔄 클라우드 자동 저장 중...";
-      const res = await fetch("https://api.github.com/gists/" + gistId, {
-        method: "PATCH",
-        headers: {
-          "Authorization": "token " + token,
-          "Accept": "application/vnd.github.v3+json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          files: {
-            "vocab_sync_data.json": {
-              content: JSON.stringify({ decks: decks, progress: progress, updated_at: new Date().toISOString() })
-            }
-          }
-        })
-      });
-      if (res.ok) {
-        statusEl.textContent = "☁️ 클라우드 동기화 완료 (" + new Date().toLocaleTimeString() + ")";
-      }
-    } catch (e) {}
-  }, 2500);
-}
-
 async function cloudPull(showAlert) {
-  const token = safeGetStorage("vocab_gist_token") || document.getElementById("gistTokenInput").value.trim();
-  const gistId = safeGetStorage("vocab_gist_id") || document.getElementById("gistIdInput").value.trim();
+  const tokenInp = document.getElementById("gistTokenInput");
+  const gistInp = document.getElementById("gistIdInput");
+  const token = (tokenInp ? tokenInp.value.trim() : "") || safeGetStorage("vocab_gist_token") || "";
+  const gistId = (gistInp ? gistInp.value.trim() : "") || safeGetStorage("vocab_gist_id") || "";
+
   if (!token || !gistId) {
     if (showAlert) alert("먼저 Token과 Gist ID를 입력해주세요.");
     return;
+  }
+
+  if (showAlert && isCloudDirty()) {
+    if (!confirm("현재 기기에 아직 클라우드에 올리지 않은 변경사항이 있습니다.\n클라우드 데이터로 덮어쓰시겠습니까?")) {
+      return;
+    }
+  }
+
+  const pullBtn = document.getElementById("btnCloudPull");
+  const statusEl = document.getElementById("syncStatusText");
+  if (pullBtn) {
+    pullBtn.disabled = true;
+    pullBtn.textContent = "⏳ 불러오는 중...";
+  }
+  if (statusEl) {
+    statusEl.textContent = "🔄 클라우드에서 불러오는 중...";
+    statusEl.style.color = "#1565c0";
   }
 
   try {
@@ -3641,6 +3684,7 @@ async function cloudPull(showAlert) {
         safeSetStorage("vocab_gist_id", gistId);
         safeSetStorage("vocab_v72_decks", JSON.stringify(decks));
         safeSetStorage("vocab_v72_progress", JSON.stringify(progress));
+        clearCloudDirty();
 
         if (progress["_last_deck"] && decks[progress["_last_deck"]]) {
           currentDeck = progress["_last_deck"];
@@ -3656,7 +3700,7 @@ async function cloudPull(showAlert) {
         autoNextOnCorrect = false;
         updateDeckSelectUI();
         updateTargetUI();
-        updateSyncBanner();
+        updateSyncBanner("☁️ 클라우드에서 불러옴 (" + new Date().toLocaleTimeString() + ")");
         if (inQuizMode) showQuizScreen(); else showManageScreen();
         if (showAlert) {
           alert("클라우드에서 최신 단어장과 진행상황을 성공적으로 불러왔습니다!");
@@ -3665,7 +3709,13 @@ async function cloudPull(showAlert) {
       }
     }
   } catch (err) {
+    updateSyncBanner();
     if (showAlert) alert("불러오기 실패: " + err.message);
+  } finally {
+    if (pullBtn) {
+      pullBtn.disabled = false;
+      pullBtn.textContent = "⬇️ 불러오기";
+    }
   }
 }
 
