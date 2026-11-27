@@ -2705,14 +2705,14 @@ async function callGeminiBatchExamplesAPI(items, apiKey, model, signal) {
     const avoid = (it.prevList && it.prevList.length > 0)
       ? " | Avoid: " + it.prevList.slice(-4).join(" / ")
       : "";
-    return (i + 1) + ". "" + it.word + "" (Korean: "" + (it.kor || "") + "")" + avoid;
+    return (i + 1) + ". \"" + it.word + "\" (Korean: \"" + (it.kor || "") + "\")" + avoid;
   }).join("\n");
 
   const promptText =
     "Create ONE natural, practical English example sentence (8 to 18 words) and its natural Korean translation for EACH word below.\n" +
     "Each sentence must use the exact English word/phrase and vary in topic.\n" +
     "Words:\n" + lines + "\n\n" +
-    "Return ONLY a valid JSON array of objects with keys: "word", "example", "translation".";
+    "Return ONLY a valid JSON array of objects with keys: \"word\", \"example\", \"translation\".";
 
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey);
   const res = await fetch(url, {
