@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>단어 암기 웹 v7.39 Web (클라우드 동기화 UI 통합 & 최적화)</title>
+<title>단어 암기 웹 v7.40 Web (구글 스타일 빠른 번역기 추가)</title>
 <style>
   :root {
     --bg-main: #f4f6f9;
@@ -556,6 +556,207 @@
     white-space: pre-wrap;
   }
 
+
+  /* 구글 스타일 인라인 빠른 번역기 */
+  .gtrans-box {
+    border: 2px solid #cfd8dc;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .gtrans-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .gtrans-lang-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 240px;
+  }
+  .gtrans-select {
+    flex: 1;
+    font-size: 15px;
+    font-weight: bold;
+    color: #1a73e8;
+    padding: 7px 10px;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .gtrans-swap-btn {
+    padding: 6px 10px;
+    font-size: 16px;
+    border-radius: 50%;
+    border: 1px solid #dadce0;
+    background: #fff;
+    color: #5f6368;
+  }
+  .gtrans-swap-btn:hover { background: #f1f3f4; }
+  .gtrans-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .gtrans-pane {
+    border: 1px solid #dadce0;
+    border-radius: 10px;
+    padding: 10px 12px 8px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 118px;
+    position: relative;
+    background: #fff;
+  }
+  .gtrans-pane.output {
+    background: #f8f9fa;
+    border-color: #e8eaed;
+  }
+  .gtrans-input-wrap {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .gtrans-textarea {
+    width: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.4;
+    background: transparent;
+    color: #202124;
+    min-height: 62px;
+  }
+  .gtrans-clear-btn {
+    border: none;
+    background: transparent;
+    color: #5f6368;
+    font-size: 18px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+  .gtrans-clear-btn:hover { color: #202124; background: #f1f3f4; border-radius: 50%; }
+  .gtrans-output-text {
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: #202124;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 62px;
+  }
+  .gtrans-output-text.placeholder {
+    color: #80868b;
+    font-size: 16px;
+    font-weight: normal;
+  }
+  .gtrans-pane-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .gtrans-icon-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .gtrans-icon-btn {
+    border: none;
+    background: transparent;
+    color: #5f6368;
+    font-size: 16px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .gtrans-icon-btn:hover { background: #e8eaed; color: #202124; }
+  .gtrans-spell {
+    font-size: 13px;
+    color: #5f6368;
+    padding: 2px 4px;
+  }
+  .gtrans-spell a {
+    color: #1a73e8;
+    font-weight: bold;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .gtrans-dict {
+    border-top: 1px solid #e8eaed;
+    padding-top: 10px;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .gtrans-dict-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #202124;
+  }
+  .gtrans-pos-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .gtrans-pos-label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #1a73e8;
+    margin-bottom: 2px;
+  }
+  .gtrans-dict-row {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f1f3f4;
+    border-left: 3px solid transparent;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .gtrans-dict-row.first {
+    border-left-color: #1a73e8;
+    background: #f8fbff;
+  }
+  .gtrans-dict-term {
+    font-size: 15px;
+    font-weight: bold;
+    color: #202124;
+    cursor: pointer;
+  }
+  .gtrans-dict-term:hover { text-decoration: underline; color: #1a73e8; }
+  .gtrans-dict-rev {
+    font-size: 13px;
+    color: #5f6368;
+    line-height: 1.4;
+  }
+  .gtrans-more-btn {
+    align-self: center;
+    padding: 6px 24px;
+    border-radius: 18px;
+    border: 1px solid #dadce0;
+    background: #f8f9fa;
+    color: #3c4043;
+    font-size: 13px;
+  }
+  .gtrans-more-btn:hover { background: #e8eaed; }
+  @media (max-width: 640px) {
+    .gtrans-grid { grid-template-columns: 1fr; }
+    .gtrans-textarea, .gtrans-output-text { font-size: 18px; }
+  }
+
   @media (max-width: 640px) {
     .app-container { padding: 10px; }
     .question-word { font-size: 34px; }
@@ -695,6 +896,57 @@
 
     <div class="group-box quiz-bottom-bar" style="justify-content:center; margin-top:0;">
       <button type="button" class="btn-red" style="width:100%; padding:11px 14px; font-size:15px;" onclick="deleteCurrentQuizWord()">🗑️ 현재 단어 삭제 (Delete)</button>
+    </div>
+  </div>
+
+  <!-- 하단: 구글 스타일 빠른 번역기 (헷갈리는 단어 즉시 비교·검색) -->
+  <div class="gtrans-box" id="gtransBox">
+    <div class="gtrans-top">
+      <div class="gtrans-lang-bar">
+        <select id="gtransSourceLang" class="gtrans-select" onchange="onGtransLangChange()">
+          <option value="auto" selected>언어 자동 감지</option>
+          <option value="en">영어</option>
+          <option value="ko">한국어</option>
+        </select>
+        <button type="button" class="gtrans-swap-btn" title="언어 바꾸기" onclick="swapGtransLangs()">⇄</button>
+        <select id="gtransTargetLang" class="gtrans-select" onchange="onGtransLangChange()">
+          <option value="ko" selected>한국어</option>
+          <option value="en">영어</option>
+        </select>
+      </div>
+      <button type="button" id="btnToggleGtrans" style="font-size:12px; padding:5px 9px;" onclick="toggleGtransBody()">접기 ▲</button>
+    </div>
+
+    <div id="gtransBody" style="display:flex; flex-direction:column; gap:10px;">
+      <div class="gtrans-grid">
+        <div class="gtrans-pane">
+          <div class="gtrans-input-wrap">
+            <textarea id="gtransInput" class="gtrans-textarea" rows="2" placeholder="헷갈리는 단어 입력 (예: retreat, retrieve)" oninput="onGtransInput()" onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); runGtransNow(); }"></textarea>
+            <button type="button" class="gtrans-clear-btn" id="gtransClearBtn" style="display:none;" title="지우기" onclick="clearGtrans()">✕</button>
+          </div>
+          <div class="gtrans-pane-footer">
+            <div class="gtrans-icon-group">
+              <button type="button" class="gtrans-icon-btn" title="원문 발음 듣기" onclick="speakGtransSource()">🔊</button>
+            </div>
+            <span id="gtransDetectedBadge" style="font-size:12px; color:#5f6368;">단축키 [T]로 바로 입력</span>
+          </div>
+        </div>
+
+        <div class="gtrans-pane output">
+          <div id="gtransOutput" class="gtrans-output-text placeholder">번역 결과</div>
+          <div class="gtrans-pane-footer">
+            <div class="gtrans-icon-group">
+              <button type="button" class="gtrans-icon-btn" title="번역 복사" onclick="copyGtransResult()">📋</button>
+              <button type="button" class="gtrans-icon-btn" title="번역 발음 듣기" onclick="speakGtransResult()">🔊</button>
+            </div>
+            <button type="button" class="btn-orange" id="btnGtransAddDeck" style="font-size:12px; padding:4px 9px; display:none;" onclick="addGtransToDeck()">➕ 단어장에 등록</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="gtransSpell" class="gtrans-spell" style="display:none;"></div>
+      <div id="gtransFeedback" style="font-size:13px; font-weight:bold; color:#2e7d32; display:none;"></div>
+      <div id="gtransDict" class="gtrans-dict"></div>
     </div>
   </div>
 </div>
@@ -3369,7 +3621,7 @@ window.addEventListener("keydown", function(e) {
 
   if (e.key === "t" || e.key === "T" || e.key === "ㅅ" || e.code === "KeyT") {
     e.preventDefault();
-    openTranslatorModal();
+    focusInlineTranslator();
     return;
   }
 
@@ -3716,6 +3968,369 @@ async function cloudPull(showAlert) {
       pullBtn.disabled = false;
       pullBtn.textContent = "⬇️ 불러오기";
     }
+  }
+}
+
+
+// --- 12. 구글 스타일 인라인 빠른 번역기 ---
+let gtransTimer = null;
+let gtransSeq = 0;
+let gtransLastEng = "";
+let gtransLastKor = "";
+let gtransLastMain = "";
+let gtransLastTargetLang = "ko";
+let gtransDictExpanded = false;
+let gtransLastDictGroups = [];
+let gtransLastQuery = "";
+
+function toggleGtransBody() {
+  const body = document.getElementById("gtransBody");
+  const btn = document.getElementById("btnToggleGtrans");
+  if (!body || !btn) return;
+  const hidden = body.style.display === "none";
+  body.style.display = hidden ? "flex" : "none";
+  btn.textContent = hidden ? "접기 ▲" : "펼치기 ▼";
+}
+
+function focusInlineTranslator() {
+  const body = document.getElementById("gtransBody");
+  const btn = document.getElementById("btnToggleGtrans");
+  if (body && body.style.display === "none") {
+    body.style.display = "flex";
+    if (btn) btn.textContent = "접기 ▲";
+  }
+  const inp = document.getElementById("gtransInput");
+  if (inp) {
+    inp.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(function() {
+      inp.focus();
+      inp.select();
+    }, 120);
+  }
+}
+
+function clearGtrans() {
+  const inp = document.getElementById("gtransInput");
+  const out = document.getElementById("gtransOutput");
+  const clr = document.getElementById("gtransClearBtn");
+  const spell = document.getElementById("gtransSpell");
+  const dict = document.getElementById("gtransDict");
+  const addBtn = document.getElementById("btnGtransAddDeck");
+  const fb = document.getElementById("gtransFeedback");
+  const badge = document.getElementById("gtransDetectedBadge");
+  if (gtransTimer) { clearTimeout(gtransTimer); gtransTimer = null; }
+  gtransSeq++;
+  if (inp) { inp.value = ""; inp.focus(); }
+  if (clr) clr.style.display = "none";
+  if (out) { out.textContent = "번역 결과"; out.className = "gtrans-output-text placeholder"; }
+  if (spell) { spell.style.display = "none"; spell.innerHTML = ""; }
+  if (dict) { dict.style.display = "none"; dict.innerHTML = ""; }
+  if (addBtn) addBtn.style.display = "none";
+  if (fb) { fb.style.display = "none"; fb.textContent = ""; }
+  if (badge) badge.textContent = "단축키 [T]로 바로 입력";
+  gtransLastEng = "";
+  gtransLastKor = "";
+  gtransLastMain = "";
+  gtransLastDictGroups = [];
+  gtransLastQuery = "";
+}
+
+function onGtransLangChange() {
+  const slEl = document.getElementById("gtransSourceLang");
+  const tlEl = document.getElementById("gtransTargetLang");
+  if (slEl && tlEl && slEl.value !== "auto" && slEl.value === tlEl.value) {
+    tlEl.value = slEl.value === "en" ? "ko" : "en";
+  }
+  runGtransNow();
+}
+
+function swapGtransLangs() {
+  const slEl = document.getElementById("gtransSourceLang");
+  const tlEl = document.getElementById("gtransTargetLang");
+  const inp = document.getElementById("gtransInput");
+  if (!slEl || !tlEl) return;
+
+  const curSl = slEl.value === "auto" ? (gtransLastTargetLang === "ko" ? "en" : "ko") : slEl.value;
+  const curTl = tlEl.value;
+  slEl.value = curTl;
+  tlEl.value = curSl;
+
+  if (gtransLastMain && inp) {
+    inp.value = gtransLastMain;
+  }
+  runGtransNow();
+}
+
+function onGtransInput() {
+  const inp = document.getElementById("gtransInput");
+  const clr = document.getElementById("gtransClearBtn");
+  const val = inp ? inp.value.trim() : "";
+  if (clr) clr.style.display = val ? "inline-block" : "none";
+  if (!val) {
+    clearGtrans();
+    return;
+  }
+  if (gtransTimer) clearTimeout(gtransTimer);
+  gtransTimer = setTimeout(function() {
+    gtransTimer = null;
+    runGtransNow();
+  }, 300);
+}
+
+async function fetchGoogleTranslateRich(text, sl, tl) {
+  const q = (text || "").trim();
+  if (!q) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(function() { controller.abort(); }, 4000);
+  try {
+    const url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=" + sl + "&tl=" + tl + "&dt=t&dt=bd&dt=qca&q=" + encodeURIComponent(q);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    let mainText = "";
+    if (Array.isArray(data) && Array.isArray(data[0])) {
+      mainText = data[0].map(function(p) { return p && p[0] ? p[0] : ""; }).join("").trim();
+    }
+
+    let detectedLang = (Array.isArray(data) && typeof data[2] === "string") ? data[2] : sl;
+    let spellSuggestion = "";
+    if (Array.isArray(data) && Array.isArray(data[7]) && typeof data[7][1] === "string" && data[7][1].trim()) {
+      spellSuggestion = data[7][1].trim();
+    }
+
+    // 품사별 상세 사전 뜻 (data[1])
+    const dictGroups = [];
+    if (Array.isArray(data) && Array.isArray(data[1])) {
+      data[1].forEach(function(group) {
+        if (!Array.isArray(group) || !group[0]) return;
+        const pos = String(group[0]);
+        const entries = [];
+        if (Array.isArray(group[2])) {
+          group[2].forEach(function(entry) {
+            if (Array.isArray(entry) && entry[0]) {
+              entries.push({
+                term: String(entry[0]),
+                rev: Array.isArray(entry[1]) ? entry[1].join(", ") : ""
+              });
+            }
+          });
+        } else if (Array.isArray(group[1])) {
+          group[1].forEach(function(term) {
+            if (term) entries.push({ term: String(term), rev: "" });
+          });
+        }
+        if (entries.length > 0) {
+          dictGroups.push({ pos: pos, entries: entries });
+        }
+      });
+    }
+
+    return {
+      main: mainText,
+      detectedLang: detectedLang,
+      spellSuggestion: spellSuggestion,
+      dictGroups: dictGroups
+    };
+  } catch (e) {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+function renderGtransDict() {
+  const dictEl = document.getElementById("gtransDict");
+  if (!dictEl) return;
+  if (!gtransLastDictGroups || gtransLastDictGroups.length === 0) {
+    dictEl.style.display = "none";
+    dictEl.innerHTML = "";
+    return;
+  }
+
+  dictEl.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "gtrans-dict-title";
+  title.textContent = "'" + gtransLastQuery + "'의 번역";
+  dictEl.appendChild(title);
+
+  let hasHiddenMore = false;
+  const maxPerGroup = gtransDictExpanded ? 20 : 3;
+
+  gtransLastDictGroups.forEach(function(grp) {
+    const groupDiv = document.createElement("div");
+    groupDiv.className = "gtrans-pos-group";
+
+    const posEl = document.createElement("div");
+    posEl.className = "gtrans-pos-label";
+    posEl.textContent = grp.pos;
+    groupDiv.appendChild(posEl);
+
+    const visibleEntries = grp.entries.slice(0, maxPerGroup);
+    if (grp.entries.length > maxPerGroup) hasHiddenMore = true;
+
+    visibleEntries.forEach(function(entry, idx) {
+      const row = document.createElement("div");
+      row.className = "gtrans-dict-row" + (idx === 0 ? " first" : "");
+
+      const termEl = document.createElement("div");
+      termEl.className = "gtrans-dict-term";
+      termEl.textContent = entry.term;
+      termEl.title = "클릭하면 발음 듣기";
+      termEl.onclick = function() {
+        if (!/[가-힣]/.test(entry.term)) speakText(entry.term);
+      };
+      row.appendChild(termEl);
+
+      if (entry.rev) {
+        const revEl = document.createElement("div");
+        revEl.className = "gtrans-dict-rev";
+        revEl.textContent = entry.rev;
+        row.appendChild(revEl);
+      }
+      groupDiv.appendChild(row);
+    });
+
+    dictEl.appendChild(groupDiv);
+  });
+
+  if (hasHiddenMore || gtransDictExpanded) {
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "gtrans-more-btn";
+    moreBtn.textContent = gtransDictExpanded ? "접기 ⌃" : "더보기 ⌄";
+    moreBtn.onclick = function() {
+      gtransDictExpanded = !gtransDictExpanded;
+      renderGtransDict();
+    };
+    dictEl.appendChild(moreBtn);
+  }
+
+  dictEl.style.display = "flex";
+}
+
+async function runGtransNow() {
+  const inp = document.getElementById("gtransInput");
+  const out = document.getElementById("gtransOutput");
+  const slEl = document.getElementById("gtransSourceLang");
+  const tlEl = document.getElementById("gtransTargetLang");
+  const spellEl = document.getElementById("gtransSpell");
+  const addBtn = document.getElementById("btnGtransAddDeck");
+  const fb = document.getElementById("gtransFeedback");
+  const badge = document.getElementById("gtransDetectedBadge");
+
+  const text = inp ? inp.value.trim() : "";
+  if (!text) return;
+
+  const isKorean = /[가-힣]/.test(text);
+  let sl = slEl ? slEl.value : "auto";
+  let tl = tlEl ? tlEl.value : "ko";
+
+  if (sl === "auto") {
+    sl = isKorean ? "ko" : "en";
+    tl = isKorean ? "en" : "ko";
+    if (tlEl) tlEl.value = tl;
+  }
+
+  gtransLastTargetLang = tl;
+  if (fb) { fb.style.display = "none"; fb.textContent = ""; }
+  if (badge) badge.textContent = (sl === "ko" ? "한국어" : "영어") + " → " + (tl === "ko" ? "한국어" : "영어");
+
+  const mySeq = ++gtransSeq;
+  out.textContent = "⏳ 번역 중...";
+  out.className = "gtrans-output-text placeholder";
+
+  const res = await fetchGoogleTranslateRich(text, sl, tl);
+  if (mySeq !== gtransSeq) return;
+
+  if (res && res.main) {
+    out.textContent = res.main;
+    out.className = "gtrans-output-text";
+    gtransLastMain = res.main;
+    gtransLastQuery = text;
+    gtransDictExpanded = false;
+    gtransLastDictGroups = res.dictGroups || [];
+
+    if (sl === "ko") {
+      gtransLastKor = text;
+      gtransLastEng = res.main;
+    } else {
+      gtransLastEng = text;
+      gtransLastKor = res.main;
+    }
+
+    if (spellEl) {
+      if (res.spellSuggestion && res.spellSuggestion.toLowerCase() !== text.toLowerCase()) {
+        spellEl.innerHTML = '이것을 찾으셨나요? <a href="#" id="gtransSpellLink">' + escapeHtmlSimple(res.spellSuggestion) + '</a>';
+        spellEl.style.display = "block";
+        const link = document.getElementById("gtransSpellLink");
+        if (link) {
+          link.onclick = function(e) {
+            e.preventDefault();
+            inp.value = res.spellSuggestion;
+            runGtransNow();
+          };
+        }
+      } else {
+        spellEl.style.display = "none";
+        spellEl.innerHTML = "";
+      }
+    }
+
+    if (addBtn) {
+      addBtn.style.display = "inline-block";
+      addBtn.textContent = "➕ [" + currentDeck + "]에 등록";
+    }
+
+    renderGtransDict();
+  } else {
+    out.textContent = "번역에 실패했습니다. 잠시 후 다시 시도해주세요.";
+    out.className = "gtrans-output-text placeholder";
+    gtransLastMain = "";
+    gtransLastEng = "";
+    gtransLastKor = "";
+    gtransLastDictGroups = [];
+    renderGtransDict();
+    if (addBtn) addBtn.style.display = "none";
+  }
+}
+
+function speakGtransSource() {
+  const text = (document.getElementById("gtransInput").value || "").trim();
+  if (text && !/[가-힣]/.test(text)) speakText(text);
+  else if (gtransLastEng) speakText(gtransLastEng);
+}
+
+function speakGtransResult() {
+  if (gtransLastMain && !/[가-힣]/.test(gtransLastMain)) speakText(gtransLastMain);
+  else if (gtransLastEng) speakText(gtransLastEng);
+}
+
+function copyGtransResult() {
+  if (!gtransLastMain) return;
+  const fb = document.getElementById("gtransFeedback");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(gtransLastMain).then(function() {
+      if (fb) {
+        fb.textContent = "📋 '" + gtransLastMain + "' 복사되었습니다.";
+        fb.style.display = "block";
+      }
+    }).catch(function() {});
+  }
+}
+
+function addGtransToDeck() {
+  if (!gtransLastEng || !gtransLastKor) return;
+  const eng = gtransLastEng.trim();
+  const kor = gtransLastKor.trim();
+  decks[currentDeck][eng] = kor;
+  saveAllState();
+  updateDeckSelectUI();
+  if (!inQuizMode) refreshWordList();
+  const fb = document.getElementById("gtransFeedback");
+  if (fb) {
+    fb.textContent = "✔️ '" + eng + " : " + kor + "' 단어가 [" + currentDeck + "]에 등록되었습니다!";
+    fb.style.display = "block";
   }
 }
 
